@@ -6,8 +6,6 @@ import {
 } from '../data/world';
 import type { AttackPreview, FactionId, GameState } from './types';
 
-/** Defense advantage: holding ground is harder to take (deterministic combat). */
-export const DEFENSE_FACTOR = 1.25;
 
 /**
  * Size drives everything (coherence): every number comes from the country's
@@ -18,9 +16,14 @@ const areaOf = (id: string): number => regionById.get(id)?.area ?? 100_000;
 /** Peacetime garrison of a neutral: Spain ~6, Bolivia ~8, Brazil ~18, Russia ~25. */
 export const garrisonForArea = (area: number): number =>
   Math.min(30, Math.max(2, Math.round(2 + Math.sqrt(area) / 180)));
-/** Starting troops in a homeland: garrison + fortification bonus, still √area. */
-export const homeForArea = (area: number): number =>
-  garrisonForArea(area) + 10 + Math.floor(Math.sqrt(area) / 400);
+/** Starting side gets its first income now; the other side receives exactly
+ * one income when its turn arrives (endTurn) — symmetric, no first-move tax
+ * or bonus. Random range (±25%) keeps every game different but still
+ * √area-proportional: big beats small always, same rule for both players. */
+export function homeForArea(area: number): number {
+  const base = garrisonForArea(area) + 10 + Math.floor(Math.sqrt(area) / 400);
+  return Math.max(6, Math.round(base * (0.75 + Math.random() * 0.5)));
+}
 /** Production per country per turn: Brazil 6, Bolivia 3, Spain 1, Russia 9. */
 export const productionForArea = (area: number): number =>
   Math.max(1, Math.round(Math.sqrt(area) / 500));
@@ -34,9 +37,13 @@ export interface IncomeResult {
   places: string[];
 }
 
-/** Troops the attacker loses taking a region with `defense` garrisoned. */
+/**
+ * Combat is 1:1 attrition: you win with strictly more troops than the
+ * garrison (a tie favors the defender). Intuitive at every scale — with 30
+ * vs 25 you DO take Russia, barely (5 left).
+ */
 export function attackCost(defense: number): number {
-  return Math.floor(defense * DEFENSE_FACTOR);
+  return defense;
 }
 
 export function createGame(first: FactionId, homelandsPerSide = 3): GameState {
@@ -58,8 +65,9 @@ export function createGame(first: FactionId, homelandsPerSide = 3): GameState {
     winner: null,
     initialHomelands,
   };
-  grantIncome(s, 'player');
-  grantIncome(s, 'ai');
+  // Only the STARTING side receives its opening income now. The rival's
+  // opening income arrives exactly once via endTurn — symmetric fairness.
+  grantIncome(s, first);
   return s;
 }
 
@@ -178,7 +186,22 @@ export function grantIncome(s: GameState, side: FactionId): IncomeResult {
     assigned += give - sh.base;
     unplaced += add(sh.id, give);
   }
-  if (unplaced > 0 && corridor) s.regions[corridor].armies += unplaced;
+  // If countries filled their caps, redistribute to those with ROOM — still
+  // honoring each cap. A small corridor can never outgrow a giant's capacity.
+  let leftover = unplaced;
+  if (leftover > 0) {
+    const withRoom = owned
+      .map((id) => ({ id, room: capForArea(areaOf(id)) - s.regions[id].armies }))
+      .filter((x) => x.room > 0)
+      .sort((a, b) => b.room - a.room);
+    for (const r of withRoom) {
+      if (leftover <= 0) break;
+      const put = Math.min(leftover, r.room);
+      s.regions[r.id].armies += put;
+      leftover -= put;
+      if (!places.includes(r.id)) places.push(r.id);
+    }
+  }
   return { income, places: places.slice(0, 3) };
 }
 

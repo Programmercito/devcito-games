@@ -105,7 +105,7 @@ export class WorldScene extends Phaser.Scene {
     const home = homeId ? regionById.get(homeId) : undefined;
     this.camX = home ? home.center[0] : WORLD_WIDTH / 2;
     this.camY = home ? home.center[1] : WORLD_HEIGHT / 2;
-    this.zoom = 1.6;
+    this.zoom = 2.2;
 
     this.labels = new Map();
     this.fills = this.add.graphics().setDepth(0);
