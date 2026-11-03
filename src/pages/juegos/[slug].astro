@@ -11,22 +11,26 @@ const game = getGame(Astro.params.slug as string)!;
 const isPlayable = game.status === 'available';
 ---
 
-<Layout title={`${game.title} — DevCito Games`} description={game.description}>
+<Layout title={`${game.title} — DevCito Games`} description={game.description} chrome={false}>
   <main class="game-page">
-    <a href="/" class="back-link">← Volver a DevCito Games</a>
+    <header class="game-bar">
+      <a href="/" class="back-pill">← <span class="back-text">Volver</span></a>
 
-    <header class="game-head">
-      <span class="genre">{game.genre}</span>
-      <h1>{game.title}</h1>
-      <p class="tagline">{game.tagline}</p>
-      <p class="description">{game.description}</p>
+      <div class="game-heading">
+        <h1>{game.title}</h1>
+        <span class="genre-pill">{game.genre}</span>
+      </div>
+
+      <button id="fullscreen-btn" class="fs-btn" type="button" aria-pressed="false">
+        ⛶ <span class="fs-text">Pantalla completa</span>
+      </button>
     </header>
 
     <div class="game-stage" data-game={game.slug} data-playable={String(isPlayable)}>
       <div class="game-root" data-game-root></div>
       {isPlayable ? null : (
         <p class="stage-note">
-          🚧 Estamos construyendo el mundo. El motor (Phaser) ya está listo arriba.
+          🚧 El juego se está construyendo — motor Phaser listo y pantalla completa ya funcionando.
         </p>
       )}
     </div>
@@ -35,91 +39,179 @@ const isPlayable = game.status === 'available';
   <script>
     import { gameMounts } from '../../lib/games/registry';
 
-    function mountGame(root: HTMLElement): void {
-      const slug = root.closest<HTMLElement>('[data-game]')?.dataset.game;
-      if (!slug) return;
+    const stage = document.querySelector<HTMLElement>('.game-stage');
+    const root = document.querySelector<HTMLElement>('[data-game-root]');
+    const slug = stage?.dataset.game;
+
+    // Module scripts are deferred, so the DOM is ready and laid out here.
+    if (stage && root && slug) {
       const mount = gameMounts[slug];
       if (mount) mount(root);
     }
 
-    // Module scripts are deferred, so the DOM is ready here.
-    document.querySelectorAll<HTMLElement>('[data-game-root]').forEach(mountGame);
+    const fsBtn = document.getElementById('fullscreen-btn');
+    const fsText = fsBtn?.querySelector('.fs-text');
+
+    fsBtn?.addEventListener('click', () => {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen();
+      } else {
+        void stage?.requestFullscreen();
+      }
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      const on = Boolean(document.fullscreenElement);
+      if (fsBtn) fsBtn.setAttribute('aria-pressed', String(on));
+      if (fsText) fsText.textContent = on ? 'Salir' : 'Pantalla completa';
+    });
   </script>
 </Layout>
 
 <style>
+  /* Full viewport: no site header/footer, the bar + stage fill the screen. */
   .game-page {
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: 2.5rem 1.5rem 5rem;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
   }
 
-  .back-link {
-    display: inline-block;
+  .game-bar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid var(--border);
+    background: rgba(8, 11, 22, 0.72);
+    backdrop-filter: blur(12px);
+  }
+
+  .back-pill {
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.42rem 0.95rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
     color: var(--text-muted);
     text-decoration: none;
-    font-size: 0.92rem;
-    margin-bottom: 2rem;
-    transition: color 0.2s ease;
+    font-size: 0.88rem;
+    white-space: nowrap;
+    transition: color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
   }
 
-  .back-link:hover {
-    color: var(--accent-cyan);
+  .back-pill:hover {
+    color: var(--text);
+    border-color: rgba(34, 211, 238, 0.5);
+    transform: translateX(-3px);
   }
 
-  .game-head {
-    margin-bottom: 2.25rem;
+  .game-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
   }
 
-  .genre {
-    display: inline-block;
-    font-size: 0.78rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--accent-violet);
-    margin-bottom: 0.6rem;
-  }
-
-  .game-head h1 {
-    font-size: clamp(2rem, 5vw, 3.25rem);
-    margin: 0 0 0.75rem;
-    letter-spacing: -0.02em;
-  }
-
-  .tagline {
-    font-size: 1.2rem;
-    color: var(--accent-cyan);
-    margin: 0 0 1rem;
-  }
-
-  .description {
-    color: var(--text-muted);
-    max-width: 40rem;
-    line-height: 1.7;
+  .game-heading h1 {
     margin: 0;
+    font-size: clamp(1.05rem, 2.6vw, 1.35rem);
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .genre-pill {
+    padding: 0.22rem 0.65rem;
+    border: 1px solid rgba(167, 139, 250, 0.45);
+    border-radius: 999px;
+    background: rgba(167, 139, 250, 0.08);
+    color: var(--accent-violet);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .fs-btn {
+    justify-self: end;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.42rem 0.95rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text);
+    font-size: 0.88rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  }
+
+  .fs-btn:hover {
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 18px rgba(34, 211, 238, 0.18);
+    transform: translateY(-1px);
   }
 
   .game-stage {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 300px;
+    margin: 0.75rem;
     border: 1px solid var(--border);
-    border-radius: 18px;
+    border-radius: 16px;
     overflow: hidden;
-    background: var(--bg-card);
+    background: #0a1122;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
   }
 
+  /* Fullscreen: the stage becomes the whole screen, drop the frame. */
+  .game-stage:fullscreen {
+    margin: 0;
+    border-radius: 0;
+    border: none;
+  }
+
+  .game-stage:fullscreen .stage-note {
+    display: none;
+  }
+
   .game-root {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    min-height: 320px;
+    position: relative;
+    flex: 1;
+    min-height: 0;
   }
 
   .stage-note {
     margin: 0;
-    padding: 1rem 1.5rem;
+    padding: 0.7rem 1.25rem;
     text-align: center;
     color: var(--text-muted);
-    font-size: 0.95rem;
+    font-size: 0.88rem;
     border-top: 1px solid var(--border);
+    background: rgba(8, 11, 22, 0.6);
+  }
+
+  @media (max-width: 640px) {
+    .back-text,
+    .fs-text {
+      display: none;
+    }
+
+    .genre-pill {
+      display: none;
+    }
   }
 </style>

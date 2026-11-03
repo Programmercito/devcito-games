@@ -12,9 +12,8 @@ export class MainScene extends Phaser.Scene {
   }
 
   create(): void {
-    const redraw = () => this.drawHexGrid();
-    redraw();
-    this.scale.on(Phaser.Scale.Events.RESIZE, redraw, this);
+    this.handleResize();
+    this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
 
     const { width, height } = this.scale;
     const cx = width / 2;
@@ -39,6 +38,9 @@ export class MainScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(2);
 
+    this.title = title;
+    this.soon = soon;
+
     this.tweens.add({
       targets: title,
       scale: 1.04,
@@ -56,6 +58,22 @@ export class MainScene extends Phaser.Scene {
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
+  }
+
+  shutdown(): void {
+    this.scale.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+  }
+
+  /**
+   * Redraw the hex grid for the current size and keep the teaser
+   * centered when the stage resizes (viewport changes, fullscreen…).
+   */
+  private handleResize(): void {
+    const { width, height } = this.scale;
+    this.drawHexGrid();
+
+    if (this.title) this.title.setPosition(width / 2, height / 2 - 28);
+    if (this.soon) this.soon.setPosition(width / 2, height / 2 + 22);
   }
 
   private drawHexGrid(): void {
@@ -110,4 +128,6 @@ export class MainScene extends Phaser.Scene {
 
   // Kept on the scene so the resize handler can clean up the old grid.
   private graphics?: Phaser.GameObjects.Graphics;
+  private title?: Phaser.GameObjects.Text;
+  private soon?: Phaser.GameObjects.Text;
 }

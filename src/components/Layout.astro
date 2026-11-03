@@ -6,9 +6,11 @@ import Footer from './Footer.astro';
 interface Props {
   title: string;
   description: string;
+  /** Game pages render their own bar; hide site header/footer there. */
+  chrome?: boolean;
 }
 
-const { title, description } = Astro.props;
+const { title, description, chrome = true } = Astro.props;
 ---
 
 <!doctype html>
@@ -29,9 +31,9 @@ const { title, description } = Astro.props;
     />
     <title>{title}</title>
   </head>
-  <body>
-    <Header />
+  <body class:list={[!chrome && 'no-chrome']}>
+    {chrome && <Header />}
     <slot />
-    <Footer />
+    {chrome && <Footer />}
   </body>
 </html>
