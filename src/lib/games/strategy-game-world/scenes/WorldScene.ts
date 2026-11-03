@@ -672,7 +672,6 @@ export class WorldScene extends Phaser.Scene {
         speedY: { min: 120, max: 300 },
         speedX: { min: -50, max: 50 },
         rotate: { min: 0, max: 360 },
-        rotateSpeed: { min: -260, max: 260 },
         scale: { min: 0.7, max: 1.4 },
         tint: [0xfbbf24, 0x22d3ee, 0xa78bfa, 0x34d399, 0xf472b6],
         frequency: 55,

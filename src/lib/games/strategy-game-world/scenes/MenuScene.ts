@@ -158,6 +158,9 @@ export class MenuScene extends Phaser.Scene {
 
   private setView(view: View): void {
     const on = view === 'title';
+    this.title.setVisible(on);
+    this.tagline.setVisible(on);
+    this.glowLine.setVisible(on);
     this.playBtn.setVisible(on);
     this.heading.setVisible(!on);
     this.countLabel.setVisible(!on);
