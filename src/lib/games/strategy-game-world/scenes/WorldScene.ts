@@ -71,10 +71,12 @@ export class WorldScene extends Phaser.Scene {
   private selected: string | null = null;
   private suicideArmed: string | null = null;
   private hoverId: string | null = null;
-  private flash: { from: string; to: string; win: boolean } | null = null;
+  private flash: { from: string; to: string; win: boolean; t0: number } | null = null;
   private busy = false;
   private dragging = false;
   private dragMoved = false;
+  private aimFrom: string | null = null;
+  private aimPos = { x: 0, y: 0 };
   private dragLast = { x: 0, y: 0 };
 
   private hud!: Phaser.GameObjects.Text;
@@ -147,7 +149,7 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(12);
 
     this.log = this.add
-      .text(0, 0, 'Arrastra para moverte · rueda para zoom', {
+      .text(0, 0, 'Arrastra desde tu país hasta el destino para atacar o mover · arrastra el mapa para moverte', {
         fontFamily: 'Inter, sans-serif',
         fontSize: '13px',
         color: '#d8eaf0',
@@ -329,16 +331,36 @@ export class WorldScene extends Phaser.Scene {
     if (this.busy || this.overlay) return;
     this.dragging = true;
     this.dragMoved = false;
+    this.aimFrom = null;
+    // Dragging from one of your own countries aims an order; elsewhere it pans.
+    if (this.state.current === 'player') {
+      const id = this.regionAt(pointer.x, pointer.y);
+      if (id && this.state.regions[id].owner === 'player') this.aimFrom = id;
+    }
     this.dragLast = { x: pointer.x, y: pointer.y };
   }
 
   private onPointerMove(pointer: Phaser.Input.Pointer): void {
     if (this.busy || this.overlay) return;
     if (this.dragging) {
-      this.attackHint.setVisible(false);
       const dx = pointer.x - this.dragLast.x;
       const dy = pointer.y - this.dragLast.y;
       if (!this.dragMoved && Math.hypot(dx, dy) < 6) return;
+      if (this.aimFrom) {
+        if (!this.dragMoved) {
+          this.selected = this.aimFrom;
+          this.suicideArmed = null;
+          sfx.select();
+        }
+        this.dragMoved = true;
+        this.aimPos = { x: pointer.x, y: pointer.y };
+        const id = this.regionAt(pointer.x, pointer.y);
+        this.hoverId = id;
+        this.updateAttackHint(id, pointer);
+        this.drawOverlay();
+        return;
+      }
+      this.attackHint.setVisible(false);
       this.dragMoved = true;
       this.camX -= dx / this.s;
       this.camY -= dy / this.s;
@@ -476,13 +498,47 @@ export class WorldScene extends Phaser.Scene {
       stroke(this.hoverId, 0xe2e8f0, 1.6, 0.5);
     }
 
+    if (this.aimFrom && this.dragMoved) {
+      const [fx, fy] = this.anchorOf(this.aimFrom);
+      const a = this.worldToScreen(fx, fy);
+      let end = { x: this.aimPos.x, y: this.aimPos.y };
+      let color = 0x94a3b8;
+      const tgt = this.hoverId;
+      if (tgt && tgt !== this.aimFrom) {
+        if (canAttack(state, this.aimFrom, tgt)) {
+          color = previewAttack(state, this.aimFrom, tgt).willCapture ? 0x22d3ee : 0xfbbf24;
+        } else if (canMove(state, this.aimFrom, tgt)) color = 0x34d399;
+        if (color !== 0x94a3b8) {
+          const [tx, ty] = this.anchorOf(tgt);
+          end = this.worldToScreen(tx, ty);
+          stroke(tgt, color, 3, 1);
+        }
+      }
+      highlights.fillStyle(color, 0.9).fillCircle(a.x, a.y, 6);
+      this.drawArrow(a.x, a.y, end.x, end.y, color);
+    }
+
     if (this.flash) {
-      const a = regionById.get(this.flash.from)!;
-      const b = regionById.get(this.flash.to)!;
-      highlights.lineStyle(4, this.flash.win ? 0xfbbf24 : 0xef4444, 0.9);
-      const pa = this.worldToScreen(a.center[0], a.center[1]);
-      const pb = this.worldToScreen(b.center[0], b.center[1]);
-      highlights.lineBetween(pa.x, pa.y, pb.x, pb.y);
+      const f = this.flash;
+      const [fx, fy] = this.anchorOf(f.from);
+      const [tx, ty] = this.anchorOf(f.to);
+      const pa = this.worldToScreen(fx, fy);
+      const pb = this.worldToScreen(tx, ty);
+      const t = this.time.now - f.t0;
+      const color = f.win ? 0xfbbf24 : 0xef4444;
+      const travel = Phaser.Math.Clamp(t / 320, 0, 1);
+      const fade = t < 520 ? 1 : Phaser.Math.Clamp(1 - (t - 520) / 380, 0, 1);
+      if (fade > 0) {
+        this.drawArrow(pa.x, pa.y, pb.x, pb.y, color, Phaser.Math.Easing.Cubic.Out(travel), 4, fade);
+      }
+      if (t > 300) {
+        // Impact shockwave on the target.
+        const k = Phaser.Math.Clamp((t - 300) / 500, 0, 1);
+        highlights.lineStyle(3, color, 1 - k);
+        highlights.strokeCircle(pb.x, pb.y, 8 + k * 46);
+        highlights.lineStyle(2, 0xffffff, (1 - k) * 0.7);
+        highlights.strokeCircle(pb.x, pb.y, 4 + k * 28);
+      }
     }
   }
 
@@ -549,7 +605,20 @@ export class WorldScene extends Phaser.Scene {
   private onPointerUp(pointer: Phaser.Input.Pointer): void {
     this.attackHint.setVisible(false);
     this.dragging = false;
-    if (this.dragMoved) return; // that was a pan, not a click
+    const aimFrom = this.aimFrom;
+    this.aimFrom = null;
+    if (this.dragMoved) {
+      // A drag from your own country is an order; any other drag was a pan.
+      if (aimFrom && !this.busy && !this.overlay && this.state.current === 'player') {
+        const target = this.regionAt(pointer.x, pointer.y);
+        if (target && target !== aimFrom) {
+          this.selected = aimFrom;
+          if (!this.tryAct(aimFrom, target)) this.explainBlocked(aimFrom, target);
+        }
+        this.drawOverlay();
+      }
+      return;
+    }
     if (this.busy || this.overlay || this.state.current !== 'player') return;
     if ([this.mainBtn, this.muteBtn, this.zoomInBtn, this.zoomOutBtn].some(
       (button) => button.visible && button.getBounds().contains(pointer.x, pointer.y),
@@ -566,44 +635,7 @@ export class WorldScene extends Phaser.Scene {
     const s = this.state;
     const rs = s.regions[id];
 
-    if (this.selected && this.selected !== id) {
-      if (canAttack(s, this.selected, id)) {
-        const from = this.selected;
-        const p = previewAttack(s, from, id);
-        if (!p.willCapture && this.suicideArmed !== id) {
-          // First click on a losing target: arm the warning, don't waste troops.
-          this.suicideArmed = id;
-          this.drawOverlay();
-          const need = p.cost + 1 - p.send;
-          this.setLog(`${nameOf(id)}: envías ${p.send} contra ${p.defense}. Faltan ${need} tropas para ganar. Espera refuerzos o toca otra vez para atacar igualmente.`);
-          sfx.repel();
-          return;
-        }
-        this.suicideArmed = null;
-        const result = performAttack(s, from, id);
-        this.flash = { from, to: id, win: result.willCapture };
-        sfx.attack();
-        if (result.willCapture) {
-          sfx.capture();
-          this.captureFx(id, [0xfbbf24, 0xf59e0b, 0xfef3c7]);
-          this.setLog(`¡${nameOf(id)} es tuyo! Enviaste ${p.send}, bajas ${p.cost}, quedan ${result.survivors}.`);
-        } else {
-          sfx.repel();
-          this.setLog(`${nameOf(id)} resiste: perdiste ${p.send}.`);
-        }
-        this.selected = result.willCapture ? id : null;
-        this.afterAction();
-        return;
-      }
-      if (canMove(s, this.selected, id)) {
-        const moved = moveArmies(s, this.selected, id, s.regions[this.selected].armies - 1);
-        sfx.move();
-        this.setLog(`Mueves ${moved} desde ${nameOf(this.selected)} a ${nameOf(id)}.`);
-        this.selected = null;
-        this.afterAction();
-        return;
-      }
-    }
+    if (this.selected && this.selected !== id && this.tryAct(this.selected, id)) return;
 
     if (rs.owner === 'player') {
       this.selected = this.selected === id ? null : id;
@@ -623,22 +655,134 @@ export class WorldScene extends Phaser.Scene {
       this.drawOverlay();
     } else {
       if (this.selected) {
-        const from = this.selected;
-        if (!ADJACENCY[from]?.includes(id)) {
-          this.setLog(`${nameOf(id)} no está conectado con ${nameOf(from)}. Elige un territorio marcado.`);
-        } else if (!s.strikers.includes(from)) {
-          this.setLog(`${nameOf(from)} fue conquistado este turno y podrá atacar en el siguiente.`);
-        } else if (s.acted.includes(from)) {
-          this.setLog(`${nameOf(from)} ya atacó este turno. Podrá volver a atacar en el siguiente.`);
-        } else if (s.regions[from].armies <= 1) {
-          this.setLog(`${nameOf(from)} necesita al menos 2 tropas para atacar. Espera refuerzos o mueve tropas aquí.`);
-        }
+        this.explainBlocked(this.selected, id);
         return;
       }
       this.setLog(`${nameOf(id)} no es tuyo. Selecciona un país propio para atacar.`);
       this.suicideArmed = null;
       this.drawOverlay();
     }
+  }
+
+  /** Attack or move from `from` to `id`. Returns true when the order was handled. */
+  private tryAct(from: string, id: string): boolean {
+    const s = this.state;
+    if (canAttack(s, from, id)) {
+      const p = previewAttack(s, from, id);
+      if (!p.willCapture && this.suicideArmed !== id) {
+        // First order on a losing target: arm the warning, don't waste troops.
+        this.suicideArmed = id;
+        this.drawOverlay();
+        const need = p.cost + 1 - p.send;
+        this.setLog(`${nameOf(id)}: envías ${p.send} contra ${p.defense}. Faltan ${need} tropas para ganar. Espera refuerzos o repite la orden para atacar igualmente.`);
+        sfx.repel();
+        return true;
+      }
+      this.suicideArmed = null;
+      const result = performAttack(s, from, id);
+      this.startFlash(from, id, result.willCapture);
+      sfx.attack();
+      if (result.willCapture) {
+        sfx.capture();
+        this.captureFx(id, [0xfbbf24, 0xf59e0b, 0xfef3c7]);
+        this.setLog(`¡${nameOf(id)} es tuyo! Enviaste ${p.send}, bajas ${p.cost}, quedan ${result.survivors}.`);
+      } else {
+        sfx.repel();
+        this.setLog(`${nameOf(id)} resiste: perdiste ${p.send}.`);
+      }
+      this.selected = result.willCapture ? id : null;
+      this.afterAction();
+      return true;
+    }
+    if (canMove(s, from, id)) {
+      const moved = moveArmies(s, from, id, s.regions[from].armies - 1);
+      sfx.move();
+      this.startFlash(from, id, true);
+      this.setLog(`Mueves ${moved} desde ${nameOf(from)} a ${nameOf(id)}.`);
+      this.selected = null;
+      this.afterAction();
+      return true;
+    }
+    return false;
+  }
+
+  private explainBlocked(from: string, id: string): void {
+    const s = this.state;
+    if (!ADJACENCY[from]?.includes(id)) {
+      this.setLog(`${nameOf(id)} no está conectado con ${nameOf(from)}. Elige un territorio marcado.`);
+    } else if (!s.strikers.includes(from)) {
+      this.setLog(`${nameOf(from)} fue conquistado este turno y podrá atacar en el siguiente.`);
+    } else if (s.acted.includes(from)) {
+      this.setLog(`${nameOf(from)} ya atacó este turno. Podrá volver a atacar en el siguiente.`);
+    } else if (s.regions[from].armies <= 1) {
+      this.setLog(`${nameOf(from)} necesita al menos 2 tropas para atacar. Espera refuerzos o mueve tropas aquí.`);
+    }
+  }
+
+  // ── order arrows ─────────────────────────────────────────────────
+
+  private anchorCache = new Map<string, [number, number]>();
+
+  private anchorOf(id: string): [number, number] {
+    let a = this.anchorCache.get(id);
+    if (!a) {
+      a = this.interiorPoint(id) ?? this.regionCenter(id) ?? [0, 0];
+      this.anchorCache.set(id, a);
+    }
+    return a;
+  }
+
+  private startFlash(from: string, to: string, win: boolean): void {
+    const t0 = this.time.now;
+    this.flash = { from, to, win, t0 };
+    this.time.delayedCall(900, () => {
+      if (this.flash?.t0 === t0) {
+        this.flash = null;
+        this.drawOverlay();
+      }
+    });
+  }
+
+  update(): void {
+    if (this.flash || (this.aimFrom && this.dragMoved)) this.drawOverlay();
+  }
+
+  /** Curved arrow with marching dashes; `progress` (0..1) grows it toward the target. */
+  private drawArrow(ax: number, ay: number, bx: number, by: number, color: number, progress = 1, width = 4, alpha = 1): void {
+    const g = this.highlights;
+    const len = Math.hypot(bx - ax, by - ay);
+    if (len < 6) return;
+    const nx = -(by - ay) / len;
+    const ny = (bx - ax) / len;
+    const bend = Math.min(len * 0.18, 90);
+    const cx = (ax + bx) / 2 + nx * bend;
+    const cy = (ay + by) / 2 + ny * bend;
+    const at = (t: number) => {
+      const u = 1 - t;
+      return { x: u * u * ax + 2 * u * t * cx + t * t * bx, y: u * u * ay + 2 * u * t * cy + t * t * by };
+    };
+    const steps = Math.max(14, Math.min(60, Math.round(len / 8)));
+    const last = Math.max(2, Math.round(steps * progress));
+    const phase = Math.floor(this.time.now / 70);
+    for (let pass = 0; pass < 2; pass++) {
+      g.lineStyle(pass === 0 ? width + 6 : width, color, (pass === 0 ? 0.18 : 0.95) * alpha);
+      for (let i = 0; i < last; i++) {
+        if (pass === 1 && (i + phase) % 4 === 3) continue;
+        const p = at(i / steps);
+        const q = at((i + 1) / steps);
+        g.lineBetween(p.x, p.y, q.x, q.y);
+      }
+    }
+    const tip = at(last / steps);
+    const prev = at((last - 1) / steps);
+    const ang = Math.atan2(tip.y - prev.y, tip.x - prev.x);
+    const h = 13 + width;
+    g.fillStyle(color, alpha);
+    g.fillTriangle(
+      tip.x + Math.cos(ang) * h * 0.6, tip.y + Math.sin(ang) * h * 0.6,
+      tip.x + Math.cos(ang + 2.5) * h, tip.y + Math.sin(ang + 2.5) * h,
+      tip.x + Math.cos(ang - 2.5) * h, tip.y + Math.sin(ang - 2.5) * h,
+    );
   }
 
   private afterAction(): void {
@@ -682,7 +826,7 @@ export class WorldScene extends Phaser.Scene {
     this.applyAiAction(a);
     this.redraw();
     this.updateHud();
-    const wait = a.type === 'attack' ? 520 : 300;
+    const wait = a.type === 'attack' ? 760 : 420;
     this.time.delayedCall(wait, () => this.playAiStep(actions, i + 1));
   }
 
@@ -690,7 +834,7 @@ export class WorldScene extends Phaser.Scene {
     const s = this.state;
     if (a.type === 'attack') {
       const r = performAttack(s, a.from, a.to);
-      this.flash = { from: a.from, to: a.to, win: r.willCapture };
+      this.startFlash(a.from, a.to, r.willCapture);
       sfx.attack();
       if (r.willCapture) {
         sfx.capture();
@@ -699,11 +843,10 @@ export class WorldScene extends Phaser.Scene {
       this.setLog(`IA: ${nameOf(a.from)} ataca ${nameOf(a.to)} — ${r.willCapture ? 'la conquista' : 'fracasa'}.`);
     } else {
       moveArmies(s, a.from, a.to, a.amount);
-      this.flash = { from: a.from, to: a.to, win: true };
+      this.startFlash(a.from, a.to, true);
       sfx.aiTick();
       this.setLog(`IA mueve ${a.amount} ejércitos hacia el frente (${nameOf(a.to)}).`);
     }
-    if (this.flash) this.time.delayedCall(400, () => { this.flash = null; this.drawOverlay(); });
   }
 
   private finishAiTurn(): void {
