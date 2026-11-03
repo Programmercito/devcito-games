@@ -1,8 +1,6 @@
 import {
   ADJACENCY,
-  AI_HOMELANDS,
   CONTINENTS,
-  PLAYER_HOMELANDS,
   REGIONS,
   STARTING_ARMIES,
   regionById,
@@ -12,23 +10,76 @@ import type { AttackPreview, FactionId, GameState } from './types';
 /** Defense advantage: holding ground is harder to take (deterministic combat). */
 export const DEFENSE_FACTOR = 1.25;
 
+export interface IncomeResult {
+  income: number;
+  /** Regions where the troops were auto-deployed (for the HUD log). */
+  places: string[];
+}
+
 /** Troops the attacker loses taking a region with `defense` garrisoned. */
 export function attackCost(defense: number): number {
   return Math.floor(defense * DEFENSE_FACTOR);
 }
 
-export function createGame(first: FactionId): GameState {
+export function createGame(first: FactionId, homelandsPerSide = 3): GameState {
   const regions: GameState['regions'] = {};
   for (const r of REGIONS) {
     regions[r.id] = { owner: null, armies: r.power + 1 };
   }
-  for (const id of PLAYER_HOMELANDS) regions[id] = { owner: 'player', armies: STARTING_ARMIES };
-  for (const id of AI_HOMELANDS) regions[id] = { owner: 'ai', armies: STARTING_ARMIES };
+  const initialHomelands = pickHomelands(homelandsPerSide);
+  for (const id of initialHomelands.player) regions[id] = { owner: 'player', armies: STARTING_ARMIES };
+  for (const id of initialHomelands.ai) regions[id] = { owner: 'ai', armies: STARTING_ARMIES };
 
-  const s: GameState = { turn: 1, current: first, acted: [], regions, winner: null };
+  const s: GameState = { turn: 1, current: first, acted: [], regions, winner: null, initialHomelands };
   grantIncome(s, 'player');
   grantIncome(s, 'ai');
   return s;
+}
+
+/**
+ * Random homelands, spread apart: bigger nations only (power ≥ 2), own
+ * homelands far from each other, enemy homelands not adjacent but close
+ * enough that fronts meet within the first minutes (early-game pressure).
+ */
+function pickHomelands(n: number): Record<FactionId, string[]> {
+  const pool = REGIONS.filter((r) => r.power >= 2);
+  const dist = (a: typeof pool[number], b: typeof pool[number]) =>
+    Math.hypot(a.center[0] - b.center[0], a.center[1] - b.center[1]);
+  const OWN_MIN = 780;
+  const ENEMY_MIN = 620;
+  const shuffled = (arr: typeof pool) => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+  const takeSpread = (minD: number, taken: Set<string>, avoid: typeof pool) => {
+    const picked: typeof pool = [];
+    const tryPick = (withOwn: boolean, withAvoid: boolean) => {
+      for (const cand of shuffled(pool)) {
+        if (picked.length >= n) return;
+        if (taken.has(cand.id)) continue;
+        if (withOwn && !picked.every((p) => dist(p, cand) >= minD)) continue;
+        if (withAvoid && !avoid.every((e) => dist(e, cand) >= ENEMY_MIN)) continue;
+        picked.push(cand);
+        taken.add(cand.id);
+      }
+    };
+    // strict first, then progressively relaxed until we hit the count
+    tryPick(true, true);
+    tryPick(true, false);
+    tryPick(false, false);
+    return picked;
+  };
+  const taken = new Set<string>();
+  const player = takeSpread(OWN_MIN, taken, []);
+  const ai = takeSpread(OWN_MIN, taken, player);
+  return {
+    player: player.map((r) => r.id),
+    ai: ai.map((r) => r.id),
+  };
 }
 
 export function ownedRegions(s: GameState, side: FactionId): string[] {
@@ -39,14 +90,17 @@ export function totalArmies(s: GameState, side: FactionId): number {
   return ownedRegions(s, side).reduce((sum, id) => sum + s.regions[id].armies, 0);
 }
 
-/** Income = base + territory scaling + continent bonuses. */
+/**
+ * Income grows with time AND territory: war mobilization rewards the player
+ * who keeps conquering. +1 every 3 turns, scaled by land owned.
+ */
 export function incomeFor(s: GameState, side: FactionId): number {
   const owned = ownedRegions(s, side);
-  let income = 3 + Math.floor(owned.length / 3);
+  let income = 2 + Math.floor(owned.length / 2) + Math.floor((s.turn - 1) / 3);
   for (const c of CONTINENTS) {
     if (c.regions.length > 0 && c.regions.every((id) => s.regions[id]?.owner === side)) income += c.bonus;
   }
-  return Math.max(income, 1);
+  return Math.max(income, 2);
 }
 
 /**
@@ -54,10 +108,10 @@ export function incomeFor(s: GameState, side: FactionId): number {
  * turn, concentrated enough to break through but spread over the top
  * corridors (50/30/20) so a single interior pile can't hoard the war chest.
  */
-export function grantIncome(s: GameState, side: FactionId): number {
+export function grantIncome(s: GameState, side: FactionId): IncomeResult {
   const income = incomeFor(s, side);
   const owned = ownedRegions(s, side);
-  if (owned.length === 0) return 0;
+  if (owned.length === 0) return { income: 0, places: [] };
 
   const corridors = topCorridors(s, side); // up to 3 distinct front regions
   const threatened = findThreatened(s, side);
@@ -66,14 +120,19 @@ export function grantIncome(s: GameState, side: FactionId): number {
     const dest = threatened.length ? threatened : owned;
     const richest = dest.sort((a, b) => s.regions[b].armies - s.regions[a].armies)[0];
     s.regions[richest].armies += income;
-    return income;
+    return { income, places: [richest] };
   }
 
   const shares = splitIncome(income, corridors.length);
+  const places: string[] = [];
   corridors.forEach((id, i) => {
-    s.regions[id].armies += shares[i] ?? 0;
+    const got = shares[i] ?? 0;
+    if (got > 0) {
+      s.regions[id].armies += got;
+      places.push(id);
+    }
   });
-  return income;
+  return { income, places };
 }
 
 function splitIncome(income: number, n: number): number[] {
@@ -168,12 +227,12 @@ export function moveArmies(s: GameState, from: string, to: string, amount: numbe
 }
 
 /** Switch to the other faction: its income auto-deploys at the front. */
-export function endTurn(s: GameState): void {
+export function endTurn(s: GameState): IncomeResult {
   const next: FactionId = s.current === 'player' ? 'ai' : 'player';
   s.current = next;
   s.acted = [];
   if (next === 'player') s.turn += 1;
-  grantIncome(s, next);
+  return grantIncome(s, next);
 }
 
 /** Victory = whole world owned, or opponent wiped off the map. */

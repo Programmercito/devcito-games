@@ -7,10 +7,6 @@ export interface RegionState {
   armies: number;
 }
 
-export interface FactionState {
-  treasury: number;
-}
-
 export interface GameState {
   turn: number;
   current: FactionId;
