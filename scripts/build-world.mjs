@@ -21,7 +21,7 @@ const W = 4096;
 const H = 2048;
 const MIN_AREA_KM2 = 45_000; // countries below this merge into smallest neighbour
 const RING_MIN_KM2 = 1_000; // omit tiny fragments that cannot be played on the map
-const MAX_POINTS_PER_RING = 90;
+const MAX_POINTS_PER_RING = 900;
 
 const proj = ([lon, lat]) => [
   ((lon + 180) / 360) * W,
@@ -82,18 +82,25 @@ function totalArea(rings) {
 function simplify(ring, maxPoints) {
   let pts = ring.slice();
   if (pts[0][0] === pts.at(-1)[0] && pts[0][1] === pts.at(-1)[1]) pts.pop();
-  const step = Math.ceil(pts.length / (maxPoints * 4));
-  if (step > 1) pts = pts.filter((p, i) => i === pts.length - 1 || i % step === 0 || sharedPoints.has(pointKey(p)));
-  while (pts.length > maxPoints) {
-    let best = -1, bestD = Infinity;
+  // Visvalingam: drop the point whose triangle with its neighbours has the least area.
+  const tri = (a, b, c) => Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
+  const areas = pts.map((p, i) => (i === 0 || i === pts.length - 1 || sharedPoints.has(pointKey(p))
+    ? Infinity
+    : tri(pts[i - 1], p, pts[i + 1])));
+  // Shared border points are always kept, so the budget only applies to the rest.
+  let removable = areas.filter((a) => a !== Infinity).length;
+  while (removable > maxPoints) {
+    let best = -1, bestA = Infinity;
     for (let i = 1; i < pts.length - 1; i++) {
-      if (sharedPoints.has(pointKey(pts[i]))) continue;
-      const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) +
-        Math.hypot(pts[i][0] - pts[i + 1][0], pts[i][1] - pts[i + 1][1]);
-      if (d < bestD) { bestD = d; best = i; }
+      if (areas[i] < bestA) { bestA = areas[i]; best = i; }
     }
     if (best === -1) break;
     pts.splice(best, 1);
+    areas.splice(best, 1);
+    removable--;
+    for (const j of [best - 1, best]) {
+      if (j > 0 && j < pts.length - 1 && areas[j] !== Infinity) areas[j] = tri(pts[j - 1], pts[j], pts[j + 1]);
+    }
   }
   return pts.map(([lon, lat]) => { const [x, y] = proj([lon, lat]); return [+x.toFixed(1), +y.toFixed(1)]; });
 }

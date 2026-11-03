@@ -419,7 +419,14 @@ export class WorldScene extends Phaser.Scene {
       fills.fillStyle(OWNER_FILL[this.regionColor(r.id)], 0.82);
       fills.lineStyle(1, 0x0a1122, 0.9);
       for (const ring of pts) {
-        fills.fillPoints(ring, true);
+        // Phaser fills as a triangle fan, which breaks concave coastlines; triangulate instead.
+        const flat: number[] = [];
+        for (const p of ring) flat.push(p.x, p.y);
+        const tris = Phaser.Geom.Polygon.Earcut(flat);
+        for (let i = 0; i < tris.length; i += 3) {
+          const a = tris[i] * 2, b = tris[i + 1] * 2, c = tris[i + 2] * 2;
+          fills.fillTriangle(flat[a], flat[a + 1], flat[b], flat[b + 1], flat[c], flat[c + 1]);
+        }
         fills.strokePoints(ring, true);
       }
     }
