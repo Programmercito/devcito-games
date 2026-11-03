@@ -66,14 +66,20 @@ function ringAreaKm2(ring) {
   return Math.abs(acc) * R_EARTH * R_EARTH / 2;
 }
 function centroidOf(rings) {
-  let x = 0, y = 0, w = 0;
-  for (const r of rings) {
-    const a = Math.max(ringAreaKm2(r), 1);
-    let cx = 0, cy = 0;
-    r.forEach(([lon, lat]) => { const [px, py] = proj([lon, lat]); cx += px; cy += py; });
-    x += (cx / r.length) * a; y += (cy / r.length) * a; w += a;
+  // Overseas territories (e.g. French Guiana) must not drag the label/arrow anchor away.
+  const main = rings.reduce((a, b) => (ringAreaKm2(b) > ringAreaKm2(a) ? b : a));
+  const pts = main.map(([lon, lat]) => proj([lon, lat]));
+  let a2 = 0, cx = 0, cy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i];
+    const [x2, y2] = pts[(i + 1) % pts.length];
+    const cross = x1 * y2 - x2 * y1;
+    a2 += cross; cx += (x1 + x2) * cross; cy += (y1 + y2) * cross;
   }
-  return [x / w, y / w];
+  if (Math.abs(a2) < 1e-9) {
+    return [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length];
+  }
+  return [cx / (3 * a2), cy / (3 * a2)];
 }
 function totalArea(rings) {
   return rings.reduce((s, r) => s + ringAreaKm2(r), 0);
