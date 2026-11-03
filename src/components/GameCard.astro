@@ -1,0 +1,179 @@
+---
+import type { Game } from '../data/games';
+import StrategyWorld from './game-art/StrategyWorld.astro';
+
+interface Props {
+  game: Game;
+}
+
+const { game } = Astro.props;
+const href = `/juegos/${game.slug}`;
+const playable = game.status === 'available';
+---
+
+<a class="game-card" href={href}>
+  <div class="card-art">
+    {game.slug === 'strategy-game-world'
+      ? <StrategyWorld />
+      : <div class="art-fallback" style={`background: ${game.accent}`)} />}
+
+    <span class:list={['badge', playable ? 'badge-play' : 'badge-soon']}>
+      <span class="badge-dot" aria-hidden="true"></span>
+      {playable ? 'Jugable ahora' : 'Próximamente'}
+    </span>
+  </div>
+
+  <div class="card-body">
+    <span class="genre">{game.genre}</span>
+    <h3>{game.title}</h3>
+    <p>{game.tagline}</p>
+    <span class="card-cta">
+      {playable ? 'Jugar ahora' : 'Ver detalle'}
+      <span class="cta-arrow" aria-hidden="true">→</span>
+    </span>
+  </div>
+</a>
+
+<style>
+  .game-card {
+    display: block;
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--bg-card);
+    text-decoration: none;
+    color: var(--text);
+    transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .game-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(160deg, rgba(56, 189, 248, 0.08), transparent 40%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+  }
+
+  .game-card:hover {
+    transform: translateY(-6px);
+    border-color: rgba(56, 189, 248, 0.5);
+    box-shadow:
+      0 16px 50px rgba(2, 8, 23, 0.7),
+      0 0 0 1px rgba(56, 189, 248, 0.18),
+      0 0 45px rgba(34, 211, 238, 0.12);
+  }
+
+  .game-card:hover::after {
+    opacity: 1;
+  }
+
+  .card-art {
+    position: relative;
+    height: 175px;
+    overflow: hidden;
+    background: #0a1430;
+  }
+
+  .card-art:hover :global(.world) {
+    transform: scale(1.05);
+  }
+
+  .game-card:hover .card-art :global(.world) {
+    transform: scale(1.06);
+  }
+
+  .art-fallback {
+    width: 100%;
+    height: 100%;
+  }
+
+  .badge {
+    position: absolute;
+    top: 0.8rem;
+    left: 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.28rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: rgba(4, 8, 18, 0.78);
+    backdrop-filter: blur(4px);
+    z-index: 2;
+  }
+
+  .badge-soon {
+    color: var(--accent-cyan);
+    border: 1px solid rgba(34, 211, 238, 0.45);
+  }
+
+  .badge-play {
+    color: #4ade80;
+    border: 1px solid rgba(74, 222, 128, 0.45);
+  }
+
+  .badge-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: blink 1.6s ease-in-out infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+
+  .card-body {
+    padding: 1.3rem 1.4rem 1.45rem;
+  }
+
+  .genre {
+    display: inline-block;
+    font-size: 0.75rem;
+    color: var(--accent-violet);
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.55rem;
+  }
+
+  .card-body h3 {
+    margin: 0 0 0.45rem;
+    font-family: 'Sora', sans-serif;
+    font-size: 1.3rem;
+    letter-spacing: -0.01em;
+  }
+
+  .card-body p {
+    margin: 0 0 1.1rem;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    line-height: 1.55;
+  }
+
+  .card-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.92rem;
+    color: var(--accent-cyan);
+    font-weight: 600;
+  }
+
+  .cta-arrow {
+    transition: transform 0.25s ease;
+  }
+
+  .game-card:hover .cta-arrow {
+    transform: translateX(5px);
+  }
+</style>

@@ -1,0 +1,140 @@
+---
+import Layout from '../components/Layout.astro';
+import GameCard from '../components/GameCard.astro';
+import { games } from '../data/games';
+---
+
+<Layout
+  title="DevCito Games — Juegos web gratis"
+  description="Una colección de juegos web hechos con amor por DevCito. Estrategia, acción y más, directo en tu navegador."
+>
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-glow" aria-hidden="true"></div>
+      <p class="hero-kicker">Una colección de juegos web</p>
+      <h1 class="hero-title">
+        DevCito<span class="hero-accent">Games</span>
+      </h1>
+      <p class="hero-subtitle">
+        Juegos gratuitos que corren directo en tu navegador. Sin descargas,
+        sin cuentas raras, sin publicidad invasiva. Solo juegos, hechos con ❤️
+        por la comunidad de <a href="https://devcito.org">DevCito</a>.
+      </p>
+      <div class="hero-actions">
+        <a href="#juegos" class="btn btn-primary">Ver los juegos</a>
+        <a href="https://devcito.org" target="_blank" rel="noopener" class="btn btn-ghost">
+          Conocé DevCito
+        </a>
+      </div>
+    </section>
+
+    <!-- Games -->
+    <section id="juegos" class="games-section">
+      <div class="section-head">
+        <h2>Los juegos</h2>
+        <p>Cada juego se hace con Phaser y se juega en el navegador.</p>
+      </div>
+      <div class="games-grid">
+        {games.map((game) => <GameCard game={game} />)}
+      </div>
+    </section>
+  </main>
+</Layout>
+
+<style>
+  .hero {
+    position: relative;
+    text-align: center;
+    padding: 6rem 1.5rem 5rem;
+  }
+
+  .hero-glow {
+    position: absolute;
+    inset: -20% -10% auto;
+    height: 100%;
+    background:
+      radial-gradient(40% 50% at 50% 0%, rgba(56, 189, 248, 0.18), transparent 70%),
+      radial-gradient(30% 40% at 30% 10%, rgba(167, 139, 250, 0.16), transparent 70%);
+    pointer-events: none;
+  }
+
+  .hero-kicker {
+    display: inline-block;
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.85rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    margin-bottom: 1.75rem;
+  }
+
+  .hero-title {
+    font-size: clamp(2.75rem, 8vw, 5.5rem);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    margin: 0 0 1.5rem;
+  }
+
+  .hero-accent {
+    display: block;
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .hero-subtitle {
+    max-width: 42rem;
+    margin: 0 auto 2.5rem;
+    font-size: 1.15rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+  }
+
+  .hero-subtitle a {
+    color: var(--accent-cyan);
+    text-decoration: none;
+  }
+
+  .hero-subtitle a:hover {
+    text-decoration: underline;
+  }
+
+  .hero-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .games-section {
+    padding: 3rem 1.5rem 6rem;
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+
+  .section-head {
+    margin-bottom: 2.5rem;
+  }
+
+  .section-head h2 {
+    font-size: 2rem;
+    margin: 0 0 0.5rem;
+  }
+
+  .section-head p {
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  .games-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
+  }
+</style>

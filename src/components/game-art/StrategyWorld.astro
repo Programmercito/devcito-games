@@ -1,0 +1,161 @@
+---
+/**
+ * Animated world-map artwork for Strategy Game World.
+ * Pure inline SVG: graticule, continents, pulsing territory pins,
+ * dashed route lines and a slow drifting cloud layer.
+ */
+---
+
+<svg
+  class="world"
+  viewBox="0 0 320 170"
+  preserveAspectRatio="xMidYMid slice"
+  role="img"
+  aria-label="Mapa del mundo con territorios y rutas de estrategia"
+>
+  <defs>
+    <linearGradient id="sw-sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a1430" />
+      <stop offset="0.55" stop-color="#123066" />
+      <stop offset="1" stop-color="#0a1a3c" />
+    </linearGradient>
+    <linearGradient id="sw-land" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2dd4bf" />
+      <stop offset="1" stop-color="#0e7490" />
+    </linearGradient>
+    <linearGradient id="sw-land2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#38bdf8" />
+      <stop offset="1" stop-color="#1e40af" />
+    </linearGradient>
+    <radialGradient id="sw-glow" cx="0.5" cy="0.42" r="0.65">
+      <stop offset="0" stop-color="#7dd3fc" stop-opacity="0.22" />
+      <stop offset="1" stop-color="#7dd3fc" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- ocean -->
+  <rect width="320" height="170" fill="url(#sw-sky)" />
+  <rect width="320" height="170" fill="url(#sw-glow)" />
+
+  <!-- graticule -->
+  <g class="graticule" stroke="#93c5fd" stroke-width="0.5" opacity="0.14" fill="none">
+    <path d="M0 42 Q160 52 320 42" />
+    <path d="M0 85 Q160 95 320 85" />
+    <path d="M0 128 Q160 138 320 128" />
+    <path d="M64 0 Q56 85 64 170" />
+    <path d="M160 0 Q158 85 160 170" />
+    <path d="M256 0 Q264 85 256 170" />
+  </g>
+
+  <!-- continents -->
+  <g stroke="#a5f3fc" stroke-opacity="0.35" stroke-width="0.8">
+    <path class="land" fill="url(#sw-land)" d="M28 58 C34 36 70 26 92 34 C106 39 104 52 94 60 C84 68 78 84 62 88 C44 92 24 78 28 58 Z" />
+    <path class="land" fill="url(#sw-land2)" d="M74 104 C82 94 96 96 98 108 C100 122 92 136 82 138 C72 140 66 128 68 118 C69 112 70 108 74 104 Z" />
+    <path class="land" fill="url(#sw-land)" d="M160 40 C180 26 228 24 262 34 C286 41 292 58 276 66 C258 75 240 70 224 78 C210 85 196 82 184 72 C170 60 152 50 160 40 Z" />
+    <path class="land" fill="url(#sw-land2)" d="M196 92 C208 82 226 86 230 100 C234 114 226 130 214 134 C200 138 190 126 190 112 C190 104 192 97 196 92 Z" />
+    <path class="land" fill="url(#sw-land)" d="M258 112 C268 106 282 110 284 120 C286 130 276 138 264 136 C254 134 250 120 258 112 Z" />
+  </g>
+
+  <!-- routes between pins -->
+  <g class="routes" fill="none" stroke="#fbbf24" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="3 7">
+    <path class="route" d="M66 55 Q150 14 236 48" />
+    <path class="route route-b" d="M236 48 Q240 86 212 110" />
+    <path class="route route-c" d="M212 110 Q140 132 70 116" />
+    <path class="route route-b" d="M70 116 Q40 86 66 55" />
+  </g>
+
+  <!-- territory pins -->
+  <g class="pins">
+    <g transform="translate(66 55)">
+      <circle class="halo" r="4" fill="none" stroke="#fde68a" stroke-width="1.2" />
+      <circle class="dot" r="2.6" fill="#fbbf24" />
+    </g>
+    <g transform="translate(236 48)">
+      <circle class="halo halo-b" r="4" fill="none" stroke="#fde68a" stroke-width="1.2" />
+      <circle class="dot" r="2.6" fill="#fbbf24" />
+    </g>
+    <g transform="translate(212 110)">
+      <circle class="halo halo-c" r="4" fill="none" stroke="#fde68a" stroke-width="1.2" />
+      <circle class="dot" r="2.6" fill="#fbbf24" />
+    </g>
+    <g transform="translate(70 116)">
+      <circle class="halo halo-b" r="4" fill="none" stroke="#fde68a" stroke-width="1.2" />
+      <circle class="dot" r="2.6" fill="#fbbf24" />
+    </g>
+  </g>
+
+  <!-- clouds -->
+  <g class="clouds" fill="#e0f2fe" opacity="0.08">
+    <ellipse class="cloud" cx="40" cy="24" rx="26" ry="5" />
+    <ellipse class="cloud cloud-b" cx="200" cy="148" rx="34" ry="5.5" />
+    <ellipse class="cloud cloud-c" cx="290" cy="30" rx="22" ry="4.5" />
+  </g>
+</svg>
+
+<style>
+  .world {
+    width: 100%;
+    height: 100%;
+    display: block;
+    transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .land {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: land-breathe 6s ease-in-out infinite;
+  }
+
+  .land:nth-child(2) { animation-delay: -1.2s; }
+  .land:nth-child(3) { animation-delay: -2.4s; }
+  .land:nth-child(4) { animation-delay: -3.6s; }
+  .land:nth-child(5) { animation-delay: -4.8s; }
+
+  @keyframes land-breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.025); }
+  }
+
+  .route {
+    animation: route-flow 2.8s linear infinite;
+  }
+
+  .route-b { animation-duration: 3.6s; }
+  .route-c { animation-duration: 4.4s; }
+
+  @keyframes route-flow {
+    to { stroke-dashoffset: -40; }
+  }
+
+  .halo {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: pin-pulse 2.2s ease-out infinite;
+  }
+
+  .halo-b { animation-delay: -0.7s; }
+  .halo-c { animation-delay: -1.4s; }
+
+  @keyframes pin-pulse {
+    0% { transform: scale(0.4); opacity: 1; }
+    70% { transform: scale(2.1); opacity: 0; }
+    100% { transform: scale(2.1); opacity: 0; }
+  }
+
+  .dot {
+    filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.9));
+  }
+
+  .cloud {
+    transform-box: fill-box;
+    animation: cloud-drift 18s linear infinite;
+  }
+
+  .cloud-b { animation-duration: 26s; animation-delay: -8s; }
+  .cloud-c { animation-duration: 22s; animation-delay: -14s; }
+
+  @keyframes cloud-drift {
+    from { transform: translateX(-60px); }
+    to { transform: translateX(380px); }
+  }
+</style>

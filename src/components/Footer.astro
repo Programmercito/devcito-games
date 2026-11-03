@@ -1,0 +1,61 @@
+---
+const year = new Date().getFullYear();
+---
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <p class="footer-line">
+      Creado con <span class="heart">❤️</span> por
+      <a href="https://devcito.org" target="_blank" rel="noopener">devcito</a>
+    </p>
+    <p class="footer-copy">© {year} DevCito · Juegos web para todos</p>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--border);
+    padding: 3rem 1.5rem;
+    text-align: center;
+    background:
+      radial-gradient(50% 100% at 50% 100%, rgba(56, 189, 248, 0.07), transparent 70%);
+  }
+
+  .footer-inner {
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+
+  .footer-line {
+    margin: 0 0 0.75rem;
+    font-size: 1.1rem;
+  }
+
+  .heart {
+    display: inline-block;
+    animation: beat 1.4s ease-in-out infinite;
+  }
+
+  @keyframes beat {
+    0%, 100% { transform: scale(1); }
+    15% { transform: scale(1.25); }
+    30% { transform: scale(1); }
+    45% { transform: scale(1.15); }
+  }
+
+  .footer-line a {
+    color: var(--accent-cyan);
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .footer-line a:hover {
+    text-decoration: underline;
+  }
+
+  .footer-copy {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: 0.85rem;
+  }
+</style>

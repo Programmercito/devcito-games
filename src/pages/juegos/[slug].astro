@@ -1,0 +1,125 @@
+---
+import Layout from '../../components/Layout.astro';
+import { games, getGame } from '../../data/games';
+import type { GetStaticPaths } from 'astro';
+
+export const getStaticPaths: GetStaticPaths = async () => {
+  return games.map((game) => ({ params: { slug: game.slug }, props: { game } }));
+};
+
+const game = getGame(Astro.params.slug as string)!;
+const isPlayable = game.status === 'available';
+---
+
+<Layout title={`${game.title} — DevCito Games`} description={game.description}>
+  <main class="game-page">
+    <a href="/" class="back-link">← Volver a DevCito Games</a>
+
+    <header class="game-head">
+      <span class="genre">{game.genre}</span>
+      <h1>{game.title}</h1>
+      <p class="tagline">{game.tagline}</p>
+      <p class="description">{game.description}</p>
+    </header>
+
+    <div class="game-stage" data-game={game.slug} data-playable={String(isPlayable)}>
+      <div class="game-root" data-game-root></div>
+      {isPlayable ? null : (
+        <p class="stage-note">
+          🚧 Estamos construyendo el mundo. El motor (Phaser) ya está listo arriba.
+        </p>
+      )}
+    </div>
+  </main>
+
+  <script>
+    import { gameMounts } from '../../lib/games/registry';
+
+    function mountGame(root: HTMLElement): void {
+      const slug = root.closest<HTMLElement>('[data-game]')?.dataset.game;
+      if (!slug) return;
+      const mount = gameMounts[slug];
+      if (mount) mount(root);
+    }
+
+    // Module scripts are deferred, so the DOM is ready here.
+    document.querySelectorAll<HTMLElement>('[data-game-root]').forEach(mountGame);
+  </script>
+</Layout>
+
+<style>
+  .game-page {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+
+  .back-link {
+    display: inline-block;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.92rem;
+    margin-bottom: 2rem;
+    transition: color 0.2s ease;
+  }
+
+  .back-link:hover {
+    color: var(--accent-cyan);
+  }
+
+  .game-head {
+    margin-bottom: 2.25rem;
+  }
+
+  .genre {
+    display: inline-block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-violet);
+    margin-bottom: 0.6rem;
+  }
+
+  .game-head h1 {
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    margin: 0 0 0.75rem;
+    letter-spacing: -0.02em;
+  }
+
+  .tagline {
+    font-size: 1.2rem;
+    color: var(--accent-cyan);
+    margin: 0 0 1rem;
+  }
+
+  .description {
+    color: var(--text-muted);
+    max-width: 40rem;
+    line-height: 1.7;
+    margin: 0;
+  }
+
+  .game-stage {
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--bg-card);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  }
+
+  .game-root {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    min-height: 320px;
+  }
+
+  .stage-note {
+    margin: 0;
+    padding: 1rem 1.5rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    border-top: 1px solid var(--border);
+  }
+</style>

@@ -1,0 +1,87 @@
+---
+const nav = [
+  { href: '/', label: 'Inicio' },
+  { href: '/#juegos', label: 'Juegos' },
+  { href: 'https://devcito.org', label: 'DevCito', external: true },
+];
+---
+
+<header class="site-header">
+  <nav class="nav">
+    <a href="/" class="brand">
+      <span class="brand-mark" aria-hidden="true">▶</span>
+      <span>DevCito <strong>Games</strong></span>
+    </a>
+    <ul class="nav-links">
+      {nav.map((item) => (
+        <li>
+          <a href={item.href} rel={item.external ? 'noopener' : undefined} target={item.external ? '_blank' : undefined}>
+            {item.label}
+          </a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+</header>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(12px);
+    background: rgba(8, 11, 22, 0.72);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .nav {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0.85rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    text-decoration: none;
+    color: var(--text);
+    font-family: 'Sora', sans-serif;
+    font-size: 1.05rem;
+  }
+
+  .brand strong {
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .brand-mark {
+    color: var(--accent-cyan);
+    font-size: 0.85rem;
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 1.5rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .nav-links a {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.95rem;
+    transition: color 0.2s ease;
+  }
+
+  .nav-links a:hover {
+    color: var(--text);
+  }
+</style>
