@@ -19,7 +19,7 @@ export const games: Game[] = [
     description:
       'Un juego de estrategia por turnos en tu navegador. Explora, expande tu imperio y domina el mapa mundial. Totalmente gratis, sin descargas.',
     genre: 'Estrategia',
-    status: 'coming-soon',
+    status: 'available',
     accent: 'linear-gradient(135deg, #1e3a8a 0%, #0ea5e9 55%, #22d3ee 100%)',
   },
 ];

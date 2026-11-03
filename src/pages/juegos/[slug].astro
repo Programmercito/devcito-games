@@ -192,6 +192,14 @@ const isPlayable = game.status === 'available';
     position: relative;
     flex: 1;
     min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Phaser canvas must not participate in inline flow or margins: that feedback
+     grows the flex parent and causes a resize loop (map/menu "drifting" down). */
+  .game-root :global(canvas) {
+    display: block;
+    margin: 0 !important;
   }
 
   .stage-note {

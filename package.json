@@ -16,6 +16,8 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.12",
-    "typescript": "^5.6.0"
+    "topojson-client": "^3.1.0",
+    "typescript": "^5.6.0",
+    "world-atlas": "^2.0.2"
   }
 }
