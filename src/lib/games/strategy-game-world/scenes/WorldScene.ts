@@ -71,11 +71,16 @@ export class WorldScene extends Phaser.Scene {
   private selected: string | null = null;
   private suicideArmed: string | null = null;
   private hoverId: string | null = null;
-  private flash: { from: string; to: string; win: boolean; t0: number } | null = null;
+  private flash: {
+    from: string; to: string; win: boolean; t0: number;
+    n: number; tint: number[] | null; hit: boolean;
+  } | null = null;
   private busy = false;
   private dragging = false;
   private dragMoved = false;
   private aimFrom: string | null = null;
+  private pinching = false;
+  private pinchLast = { dist: 1, x: 0, y: 0 };
   private aimPos = { x: 0, y: 0 };
   private dragLast = { x: 0, y: 0 };
 
@@ -175,6 +180,13 @@ export class WorldScene extends Phaser.Scene {
     }, { fontSize: '13px', depth: 14 });
     this.zoomOutBtn = makeButton(this, 0, 0, '−', () => this.zoomBy(1 / 1.5), { depth: 14, paddingY: 14 });
     this.zoomInBtn = makeButton(this, 0, 0, '+', () => this.zoomBy(1.5), { depth: 14, paddingY: 14 });
+    // Touch screens zoom by pinching; the buttons only stay for mouse/trackpad users.
+    this.input.addPointer(1);
+    this.pinching = false;
+    if (window.matchMedia?.('(pointer: coarse)').matches) {
+      this.zoomInBtn.setVisible(false);
+      this.zoomOutBtn.setVisible(false);
+    }
 
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -195,7 +207,7 @@ export class WorldScene extends Phaser.Scene {
       this.setLog(`Tus países: ${homelands}. Empieza la computadora…`);
       this.runAiTurn();
     } else {
-      this.setLog(`Tus países: ${homelands}. Usa + para acercar el mapa. Los refuerzos llegan desde el segundo turno.`);
+      this.setLog(`Tus países: ${homelands}. Pellizca con dos dedos (o usa la rueda) para acercar el mapa. Los refuerzos llegan desde el segundo turno.`);
     }
   }
 
@@ -329,6 +341,10 @@ export class WorldScene extends Phaser.Scene {
 
   private onDragStart(pointer: Phaser.Input.Pointer): void {
     if (this.busy || this.overlay) return;
+    if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
+      this.startPinch();
+      return;
+    }
     this.dragging = true;
     this.dragMoved = false;
     this.aimFrom = null;
@@ -340,8 +356,41 @@ export class WorldScene extends Phaser.Scene {
     this.dragLast = { x: pointer.x, y: pointer.y };
   }
 
+  private pinchState(): { dist: number; x: number; y: number } {
+    const a = this.input.pointer1;
+    const b = this.input.pointer2;
+    return { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  /** A second finger turns whatever the first one was doing into a pinch-zoom/pan gesture. */
+  private startPinch(): void {
+    this.pinching = true;
+    this.pinchLast = this.pinchState();
+    this.aimFrom = null;
+    this.dragging = false;
+    this.dragMoved = true;
+    this.attackHint.setVisible(false);
+    this.drawOverlay();
+  }
+
+  private onPinchMove(): void {
+    const cur = this.pinchState();
+    const last = this.pinchLast;
+    const anchor = this.screenToWorld(last.x, last.y);
+    this.zoom = Phaser.Math.Clamp(this.zoom * (cur.dist / last.dist), 1, 9);
+    this.camX = anchor.x - (cur.x - this.view.w / 2) / this.s;
+    this.camY = anchor.y - (cur.y - this.view.h / 2) / this.s;
+    this.pinchLast = cur;
+    this.clampCam();
+    this.redraw();
+  }
+
   private onPointerMove(pointer: Phaser.Input.Pointer): void {
     if (this.busy || this.overlay) return;
+    if (this.pinching) {
+      if (this.input.pointer1.isDown && this.input.pointer2.isDown) this.onPinchMove();
+      return;
+    }
     if (this.dragging) {
       const dx = pointer.x - this.dragLast.x;
       const dy = pointer.y - this.dragLast.y;
@@ -503,19 +552,31 @@ export class WorldScene extends Phaser.Scene {
       const a = this.worldToScreen(fx, fy);
       let end = { x: this.aimPos.x, y: this.aimPos.y };
       let color = 0x94a3b8;
+      let troops = 4;
       const tgt = this.hoverId;
       if (tgt && tgt !== this.aimFrom) {
         if (canAttack(state, this.aimFrom, tgt)) {
-          color = previewAttack(state, this.aimFrom, tgt).willCapture ? 0x22d3ee : 0xfbbf24;
-        } else if (canMove(state, this.aimFrom, tgt)) color = 0x34d399;
+          const p = previewAttack(state, this.aimFrom, tgt);
+          color = p.willCapture ? 0x22d3ee : 0xfbbf24;
+          troops = p.send;
+        } else if (canMove(state, this.aimFrom, tgt)) {
+          color = 0x34d399;
+          troops = state.regions[this.aimFrom].armies - 1;
+        }
         if (color !== 0x94a3b8) {
           const [tx, ty] = this.anchorOf(tgt);
           end = this.worldToScreen(tx, ty);
           stroke(tgt, color, 3, 1);
         }
       }
-      highlights.fillStyle(color, 0.9).fillCircle(a.x, a.y, 6);
-      this.drawArrow(a.x, a.y, end.x, end.y, color);
+      const now = this.time.now;
+      const pulse = 1 + 0.25 * Math.sin(now / 120);
+      highlights.fillStyle(color, 0.25).fillCircle(a.x, a.y, 14 * pulse);
+      highlights.fillStyle(color, 0.95).fillCircle(a.x, a.y, 6);
+      const n = Phaser.Math.Clamp(Math.round(troops / 2), 3, 12);
+      this.drawArrow(a.x, a.y, end.x, end.y, color, {
+        dots: { n, pos: (i) => (now / 1100 + i / n) % 1 },
+      });
     }
 
     if (this.flash) {
@@ -526,18 +587,30 @@ export class WorldScene extends Phaser.Scene {
       const pb = this.worldToScreen(tx, ty);
       const t = this.time.now - f.t0;
       const color = f.win ? 0xfbbf24 : 0xef4444;
-      const travel = Phaser.Math.Clamp(t / 320, 0, 1);
-      const fade = t < 520 ? 1 : Phaser.Math.Clamp(1 - (t - 520) / 380, 0, 1);
+      const fade = t < 650 ? 1 : Phaser.Math.Clamp(1 - (t - 650) / 400, 0, 1);
       if (fade > 0) {
-        this.drawArrow(pa.x, pa.y, pb.x, pb.y, color, Phaser.Math.Easing.Cubic.Out(travel), 4, fade);
+        this.drawArrow(pa.x, pa.y, pb.x, pb.y, color, {
+          progress: Phaser.Math.Easing.Cubic.Out(Phaser.Math.Clamp(t / 260, 0, 1)),
+          alpha: fade,
+          width: 6,
+          dots: {
+            n: f.n,
+            pos: (i) => Phaser.Math.Easing.Cubic.In(Phaser.Math.Clamp((t - 80 - i * 35) / 420, 0, 1)),
+          },
+        });
       }
-      if (t > 300) {
+      if (t >= 500 && !f.hit) {
+        f.hit = true;
+        this.impactFx(f.to, f.tint ?? [color, 0xffffff], f.tint !== null);
+      }
+      if (t > 500) {
         // Impact shockwave on the target.
-        const k = Phaser.Math.Clamp((t - 300) / 500, 0, 1);
-        highlights.lineStyle(3, color, 1 - k);
-        highlights.strokeCircle(pb.x, pb.y, 8 + k * 46);
-        highlights.lineStyle(2, 0xffffff, (1 - k) * 0.7);
-        highlights.strokeCircle(pb.x, pb.y, 4 + k * 28);
+        const k = Phaser.Math.Clamp((t - 500) / 550, 0, 1);
+        highlights.lineStyle(4, color, 1 - k);
+        highlights.strokeCircle(pb.x, pb.y, 10 + k * 56);
+        highlights.lineStyle(2, 0xffffff, (1 - k) * 0.8);
+        highlights.strokeCircle(pb.x, pb.y, 5 + k * 34);
+        highlights.fillStyle(color, (1 - k) * 0.35).fillCircle(pb.x, pb.y, 8 + k * 24);
       }
     }
   }
@@ -604,6 +677,13 @@ export class WorldScene extends Phaser.Scene {
 
   private onPointerUp(pointer: Phaser.Input.Pointer): void {
     this.attackHint.setVisible(false);
+    if (this.pinching) {
+      // Stay in pinch mode until both fingers are up so the leftover finger can't click or pan.
+      if (!this.input.pointer1.isDown && !this.input.pointer2.isDown) this.pinching = false;
+      this.dragging = false;
+      this.aimFrom = null;
+      return;
+    }
     this.dragging = false;
     const aimFrom = this.aimFrom;
     this.aimFrom = null;
@@ -680,11 +760,10 @@ export class WorldScene extends Phaser.Scene {
       }
       this.suicideArmed = null;
       const result = performAttack(s, from, id);
-      this.startFlash(from, id, result.willCapture);
+      this.startFlash(from, id, result.willCapture, p.send, result.willCapture ? [0xfbbf24, 0xf59e0b, 0xfef3c7] : null);
       sfx.attack();
       if (result.willCapture) {
         sfx.capture();
-        this.captureFx(id, [0xfbbf24, 0xf59e0b, 0xfef3c7]);
         this.setLog(`¡${nameOf(id)} es tuyo! Enviaste ${p.send}, bajas ${p.cost}, quedan ${result.survivors}.`);
       } else {
         sfx.repel();
@@ -697,7 +776,7 @@ export class WorldScene extends Phaser.Scene {
     if (canMove(s, from, id)) {
       const moved = moveArmies(s, from, id, s.regions[from].armies - 1);
       sfx.move();
-      this.startFlash(from, id, true);
+      this.startFlash(from, id, true, moved);
       this.setLog(`Mueves ${moved} desde ${nameOf(from)} a ${nameOf(id)}.`);
       this.selected = null;
       this.afterAction();
@@ -732,10 +811,10 @@ export class WorldScene extends Phaser.Scene {
     return a;
   }
 
-  private startFlash(from: string, to: string, win: boolean): void {
+  private startFlash(from: string, to: string, win: boolean, troops: number, captureTint: number[] | null = null): void {
     const t0 = this.time.now;
-    this.flash = { from, to, win, t0 };
-    this.time.delayedCall(900, () => {
+    this.flash = { from, to, win, t0, n: Phaser.Math.Clamp(Math.round(troops / 2), 3, 12), tint: captureTint, hit: false };
+    this.time.delayedCall(1100, () => {
       if (this.flash?.t0 === t0) {
         this.flash = null;
         this.drawOverlay();
@@ -747,42 +826,102 @@ export class WorldScene extends Phaser.Scene {
     if (this.flash || (this.aimFrom && this.dragMoved)) this.drawOverlay();
   }
 
-  /** Curved arrow with marching dashes; `progress` (0..1) grows it toward the target. */
-  private drawArrow(ax: number, ay: number, bx: number, by: number, color: number, progress = 1, width = 4, alpha = 1): void {
+  /**
+   * Glowing curved arrow that widens toward the tip, with energy pulses and a pulsing head.
+   * `dots` places troop orbs (position 0..1 along the curve) that run down the arrow.
+   */
+  private drawArrow(
+    ax: number, ay: number, bx: number, by: number, color: number,
+    o: { progress?: number; alpha?: number; width?: number; dots?: { n: number; pos: (i: number) => number } } = {},
+  ): void {
+    const { progress = 1, alpha = 1, width = 5, dots } = o;
     const g = this.highlights;
     const len = Math.hypot(bx - ax, by - ay);
     if (len < 6) return;
     const nx = -(by - ay) / len;
     const ny = (bx - ax) / len;
-    const bend = Math.min(len * 0.18, 90);
+    const bend = Math.min(len * 0.2, 100);
     const cx = (ax + bx) / 2 + nx * bend;
     const cy = (ay + by) / 2 + ny * bend;
     const at = (t: number) => {
       const u = 1 - t;
       return { x: u * u * ax + 2 * u * t * cx + t * t * bx, y: u * u * ay + 2 * u * t * cy + t * t * by };
     };
-    const steps = Math.max(14, Math.min(60, Math.round(len / 8)));
+    const steps = Math.max(16, Math.min(80, Math.round(len / 6)));
     const last = Math.max(2, Math.round(steps * progress));
-    const phase = Math.floor(this.time.now / 70);
-    for (let pass = 0; pass < 2; pass++) {
-      g.lineStyle(pass === 0 ? width + 6 : width, color, (pass === 0 ? 0.18 : 0.95) * alpha);
+    const now = this.time.now;
+    const pts = Array.from({ length: last + 1 }, (_, i) => at(i / steps));
+    const widthAt = (i: number) => width * (0.35 + 0.9 * (i / steps));
+
+    const passes: [number, number, number][] = [
+      [3.4, 0.1, color], [1.9, 0.22, color], [1, 0.95, color], [0.32, 0.6, 0xffffff],
+    ];
+    for (const [m, a, c] of passes) {
       for (let i = 0; i < last; i++) {
-        if (pass === 1 && (i + phase) % 4 === 3) continue;
-        const p = at(i / steps);
-        const q = at((i + 1) / steps);
-        g.lineBetween(p.x, p.y, q.x, q.y);
+        g.lineStyle(widthAt(i) * m, c, a * alpha);
+        g.lineBetween(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
       }
     }
-    const tip = at(last / steps);
-    const prev = at((last - 1) / steps);
+
+    // Bright energy pulses sliding along the beam.
+    for (let k = 0; k < 3; k++) {
+      const t = (((now / 650) + k / 3) % 1) * progress;
+      const p = at(t);
+      g.fillStyle(0xffffff, 0.85 * alpha).fillCircle(p.x, p.y, 2.5 + 2 * t);
+    }
+
+    // Troop orbs with comet trails.
+    if (dots) {
+      for (let i = 0; i < dots.n; i++) {
+        const head = dots.pos(i);
+        if (head <= 0.001 || head >= 0.999) continue;
+        for (let j = 4; j >= 0; j--) {
+          const tt = head - j * 0.02;
+          if (tt <= 0) continue;
+          const p = at(Math.min(tt, progress));
+          const r = 5.5 - j * 0.9;
+          const a = (1 - j * 0.18) * alpha;
+          g.fillStyle(color, 0.3 * a).fillCircle(p.x, p.y, r * 2);
+          g.fillStyle(color, a).fillCircle(p.x, p.y, r);
+          if (j === 0) g.fillStyle(0xffffff, 0.95 * alpha).fillCircle(p.x, p.y, r * 0.45);
+        }
+      }
+    }
+
+    // Pulsing arrowhead.
+    const tip = pts[last];
+    const prev = pts[Math.max(0, last - 2)];
     const ang = Math.atan2(tip.y - prev.y, tip.x - prev.x);
-    const h = 13 + width;
-    g.fillStyle(color, alpha);
-    g.fillTriangle(
-      tip.x + Math.cos(ang) * h * 0.6, tip.y + Math.sin(ang) * h * 0.6,
-      tip.x + Math.cos(ang + 2.5) * h, tip.y + Math.sin(ang + 2.5) * h,
-      tip.x + Math.cos(ang - 2.5) * h, tip.y + Math.sin(ang - 2.5) * h,
-    );
+    const h = (14 + width * 1.6) * (1 + 0.18 * Math.sin(now / 80));
+    const head = (size: number, c: number, a: number) => {
+      g.fillStyle(c, a * alpha);
+      g.fillTriangle(
+        tip.x + Math.cos(ang) * size * 0.8, tip.y + Math.sin(ang) * size * 0.8,
+        tip.x + Math.cos(ang + 2.45) * size, tip.y + Math.sin(ang + 2.45) * size,
+        tip.x + Math.cos(ang - 2.45) * size, tip.y + Math.sin(ang - 2.45) * size,
+      );
+    };
+    head(h * 1.7, color, 0.22);
+    head(h, color, 1);
+    head(h * 0.5, 0xffffff, 0.85);
+  }
+
+  private impactFx(regionId: string, tint: number[], capture: boolean): void {
+    if (capture) {
+      this.captureFx(regionId, tint);
+      return;
+    }
+    const center = this.anchorOf(regionId);
+    const p = this.worldToScreen(center[0], center[1]);
+    const burst = this.add.particles(p.x, p.y, 'spark', {
+      speed: { min: 40, max: 150 },
+      scale: { start: 0.9, end: 0 },
+      lifespan: 450,
+      tint,
+      emitting: false,
+    });
+    burst.explode(12);
+    this.time.delayedCall(700, () => burst.destroy());
   }
 
   private afterAction(): void {
@@ -833,17 +972,15 @@ export class WorldScene extends Phaser.Scene {
   private applyAiAction(a: AiAction): void {
     const s = this.state;
     if (a.type === 'attack') {
+      const send = previewAttack(s, a.from, a.to).send;
       const r = performAttack(s, a.from, a.to);
-      this.startFlash(a.from, a.to, r.willCapture);
+      this.startFlash(a.from, a.to, r.willCapture, send, r.willCapture ? [0xef4444, 0xf97316, 0xfecaca] : null);
       sfx.attack();
-      if (r.willCapture) {
-        sfx.capture();
-        this.captureFx(a.to, [0xef4444, 0xf97316, 0xfecaca]);
-      }
+      if (r.willCapture) sfx.capture();
       this.setLog(`IA: ${nameOf(a.from)} ataca ${nameOf(a.to)} — ${r.willCapture ? 'la conquista' : 'fracasa'}.`);
     } else {
       moveArmies(s, a.from, a.to, a.amount);
-      this.startFlash(a.from, a.to, true);
+      this.startFlash(a.from, a.to, true, a.amount);
       sfx.aiTick();
       this.setLog(`IA mueve ${a.amount} ejércitos hacia el frente (${nameOf(a.to)}).`);
     }
