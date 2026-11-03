@@ -45,8 +45,9 @@ src/
 
 - **Strategy Game World** — jugable contra la computadora. Selecciona un país propio: el borde celeste indica una victoria prevista, el dorado un ataque posible que perderías y el verde permite mover tropas. Para conquistar necesitas más tropas en el país atacante que en el defensor; los empates favorecen al defensor.
 - La partida comienza mostrando el mapa completo. Arrástralo para desplazarte y usa la rueda o los botones `+` y `−` para acercarlo y alejarlo, también en móvil.
-- Las tropas iniciales dependen del área del país y varían entre partidas, con la misma regla para territorios neutrales, del jugador y de la computadora. Cada bando recibe refuerzos a partir de su segundo turno.
+- Las tropas iniciales se sortean en un rango proporcional al área, con la misma regla para territorios neutrales, del jugador y de la computadora. Cada bando recibe refuerzos a partir de su segundo turno.
 - Los países iniciales se sortean entre todos los territorios jugables, sin restringir su tamaño, continente o distancia; nunca se asigna el mismo país a ambos bandos.
+- Cada país disponible al comenzar el turno puede atacar una vez; los recién conquistados esperan al siguiente turno para atacar.
 - Los territorios diminutos se fusionan con sus vecinos o se omiten si son islas aisladas; los demás cuentan con rutas conectadas.
 - Para actualizar el mapa después de modificar el generador, ejecuta `node scripts/build-world.mjs` y luego `pnpm test:strategy`.
 

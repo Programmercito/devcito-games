@@ -17,8 +17,13 @@ const areaOf = (id: string): number => regionById.get(id)?.area ?? 100_000;
 export const garrisonForArea = (area: number): number =>
   Math.min(30, Math.max(2, Math.round(2 + Math.sqrt(area) / 180)));
 /** Initial garrisons vary each game without changing their size-based baseline. */
-export const initialGarrisonForArea = (area: number): number =>
-  Math.max(2, Math.round(garrisonForArea(area) * (0.85 + Math.random() * 0.3)));
+export const initialGarrisonForArea = (area: number): number => {
+  const base = garrisonForArea(area);
+  const variation = Math.max(1, Math.ceil(base * 0.3));
+  const min = Math.max(2, base - variation);
+  const max = base + variation;
+  return min + Math.floor(Math.random() * (max - min + 1));
+};
 /** Production per country per turn: Brazil 6, Bolivia 3, Spain 1, Russia 9. */
 export const productionForArea = (area: number): number =>
   Math.max(1, Math.round(Math.sqrt(area) / 500));

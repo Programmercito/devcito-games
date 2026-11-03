@@ -34,6 +34,21 @@ const feats = feature(topo, topo.objects.countries).features.filter(
 
 // ── geometry helpers (lon/lat) ─────────────────────────────────────
 
+const pointKey = ([lon, lat]) => `${lon.toFixed(6)},${lat.toFixed(6)}`;
+const pointOwners = new Map();
+const sharedPoints = new Set();
+for (const f of feats) {
+  const id = String(f.id ?? `X:${f.properties.name}`);
+  const outer = f.geometry.type === 'Polygon'
+    ? [f.geometry.coordinates[0]]
+    : f.geometry.coordinates.map((p) => p[0]);
+  for (const ring of outer) for (const point of ring) {
+    const key = pointKey(point);
+    if (pointOwners.has(key) && pointOwners.get(key) !== id) sharedPoints.add(key);
+    else pointOwners.set(key, id);
+  }
+}
+
 /**
  * TRUE spherical area of a lon/lat ring (Chamberlain–Duquette).
  * Naive projected area lies by 5x for high-latitude countries — with
@@ -63,20 +78,21 @@ function centroidOf(rings) {
 function totalArea(rings) {
   return rings.reduce((s, r) => s + ringAreaKm2(r), 0);
 }
-/** Decimate + Douglas–Peucker-ish removal keeping ≤ maxPoints and shape. */
+/** Keep shared borders intact while reducing points along coastlines. */
 function simplify(ring, maxPoints) {
   let pts = ring.slice();
   if (pts[0][0] === pts.at(-1)[0] && pts[0][1] === pts.at(-1)[1]) pts.pop();
   const step = Math.ceil(pts.length / (maxPoints * 4));
-  if (step > 1) pts = pts.filter((_, i) => i % step === 0);
+  if (step > 1) pts = pts.filter((p, i) => i === pts.length - 1 || i % step === 0 || sharedPoints.has(pointKey(p)));
   while (pts.length > maxPoints) {
-    // remove the point closest to its neighbours (least corner-y)
-    let best = 1, bestD = Infinity;
+    let best = -1, bestD = Infinity;
     for (let i = 1; i < pts.length - 1; i++) {
-      const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i + 1][1]) +
+      if (sharedPoints.has(pointKey(pts[i]))) continue;
+      const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) +
         Math.hypot(pts[i][0] - pts[i + 1][0], pts[i][1] - pts[i + 1][1]);
       if (d < bestD) { bestD = d; best = i; }
     }
+    if (best === -1) break;
     pts.splice(best, 1);
   }
   return pts.map(([lon, lat]) => { const [x, y] = proj([lon, lat]); return [+x.toFixed(1), +y.toFixed(1)]; });
@@ -153,6 +169,7 @@ for (const f of feats) {
   const rec = {
     id,
     name: f.properties.name,
+    sourceIds: [id],
     geoRings: ringsGeo,
     rings: ringsGeo.map((r) => simplify(r, MAX_POINTS_PER_RING)),
     area: totalArea(ringsGeo),
@@ -210,6 +227,7 @@ for (const c of small) {
     continue;
   }
   const host = nbrs.map((n) => byId.get(n)).sort((x, y) => x.area - y.area)[0];
+  host.sourceIds.push(...c.sourceIds);
   host.rings = host.rings.concat(c.rings);
   host.geoRings = host.geoRings.concat(c.geoRings);
   host.area += c.area;
@@ -383,6 +401,8 @@ export type ContinentId = ${regions.map((r) => `'${r.continent}'`).filter((v, i,
 export interface RegionData {
   id: string;
   name: string;
+  /** Countries represented by this region after small-territory merges. */
+  sourceIds: string[];
   continent: ContinentId;
   /** 1..8 coarse tier (kept for tie-breaking). */
   power: number;
@@ -399,7 +419,7 @@ export const WORLD_HEIGHT = ${H};
 export const REGIONS: RegionData[] = [`);
 for (const r of regions) {
   const rings = r.rings.map((ring) => `[[${ring.map((p) => p.join(',')).join('],[')}]]`).join(',');
-  lines.push(`  { id: '${r.id}', name: '${r.name.replace(/'/g, "’")}', continent: '${r.continent}', power: ${powerOf(r.area)}, area: ${Math.round(r.area)}, center: [${r.center.map((v) => v.toFixed(0)).join(',')}], rings: [${rings}] },`);
+  lines.push(`  { id: '${r.id}', name: '${r.name.replace(/'/g, "’")}', sourceIds: ${JSON.stringify(r.sourceIds)}, continent: '${r.continent}', power: ${powerOf(r.area)}, area: ${Math.round(r.area)}, center: [${r.center.map((v) => v.toFixed(0)).join(',')}], rings: [${rings}] },`);
 }
 lines.push(`];
 

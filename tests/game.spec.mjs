@@ -110,6 +110,90 @@ test('se puede seleccionar y conquistar un vecino', async ({ page, isMobile }) =
   expect(result.log).toContain('Paraguay es tuyo');
 });
 
+test('un rótulo superpuesto no impide seleccionar el país visible', async ({ page, isMobile }) => {
+  await startGame(page, isMobile);
+  for (let i = 0; i < 6; i++) await sceneButton(page, 'World', 'zoomInBtn', isMobile);
+  const points = await page.evaluate(() => {
+    const game = window.__strategyGame;
+    const scene = game.scene.getScene('World');
+    const canvas = game.canvas.getBoundingClientRect();
+    scene.state.current = 'player';
+    scene.state.regions['068'] = { owner: 'player', armies: 7 };
+    scene.state.regions['600'] = { owner: null, armies: 6 };
+    scene.state.strikers = ['068'];
+    scene.state.acted = [];
+    const a = scene.regionCenter('068');
+    const b = scene.regionCenter('600');
+    scene.camX = (a[0] + b[0]) / 2;
+    scene.camY = (a[1] + b[1]) / 2;
+    scene.redraw();
+    for (const label of scene.labels.values()) {
+      label.name.setVisible(false);
+      label.army.setVisible(false);
+    }
+    const findPoint = (id) => {
+      const center = scene.regionCenter(id);
+      const screen = scene.worldToScreen(center[0], center[1]);
+      for (let radius = 0; radius <= 100; radius += 5) {
+        for (let dx = -radius; dx <= radius; dx += 5) {
+          for (const dy of [-radius, radius]) {
+            const x = screen.x + dx;
+            const y = screen.y + dy;
+            if (x > 10 && x < scene.view.w - 10 && y > 115 && y < scene.view.h - 70 && scene.regionAt(x, y) === id) return { x, y };
+          }
+        }
+      }
+      throw new Error(`No visible polygon point for ${id}`);
+    };
+    const from = findPoint('068');
+    const to = findPoint('600');
+    const overlappingLabel = scene.labels.get('032').army;
+    overlappingLabel.setText('999').setPosition(to.x, to.y).setVisible(true);
+    return {
+      from: { x: canvas.left + from.x, y: canvas.top + from.y },
+      to: { x: canvas.left + to.x, y: canvas.top + to.y },
+      targetUnderLabel: scene.regionAt(to.x, to.y),
+    };
+  });
+  expect(points.targetUnderLabel).toBe('600');
+  for (const point of [points.from, points.to]) {
+    if (isMobile) await page.touchscreen.tap(point.x, point.y);
+    else await page.mouse.click(point.x, point.y);
+  }
+  await expect.poll(() => page.evaluate(() => window.__strategyGame.scene.getScene('World').state.regions['600'])).toEqual({ owner: 'player', armies: 1 });
+});
+
+test('Mongolia puede atacar Rusia desde el mapa', async ({ page, isMobile }) => {
+  await startGame(page, isMobile);
+  for (let i = 0; i < 6; i++) await sceneButton(page, 'World', 'zoomInBtn', isMobile);
+  const points = await page.evaluate(() => {
+    const game = window.__strategyGame;
+    const scene = game.scene.getScene('World');
+    const canvas = game.canvas.getBoundingClientRect();
+    const worldPoint = (lon, lat) => [((lon + 180) / 360) * 4096, ((90 - lat) / 180) * 2048];
+    const mongolia = worldPoint(106, 49);
+    const russia = worldPoint(106, 52.5);
+    scene.camX = (mongolia[0] + russia[0]) / 2;
+    scene.camY = (mongolia[1] + russia[1]) / 2;
+    scene.state.current = 'player';
+    scene.state.regions['496'] = { owner: 'player', armies: 7 };
+    scene.state.regions['643'] = { owner: null, armies: 6 };
+    scene.state.strikers = ['496'];
+    scene.state.acted = [];
+    scene.redraw();
+    return [mongolia, russia].map(([x, y]) => {
+      const screen = scene.worldToScreen(x, y);
+      return { x: canvas.left + screen.x, y: canvas.top + screen.y, id: scene.regionAt(screen.x, screen.y) };
+    });
+  });
+  expect(points.map((point) => point.id)).toEqual(['496', '643']);
+  for (const point of points) {
+    if (isMobile) await page.touchscreen.tap(point.x, point.y);
+    else await page.mouse.click(point.x, point.y);
+  }
+  await expect.poll(() => page.evaluate(() => window.__strategyGame.scene.getScene('World').state.regions['643'])).toEqual({ owner: 'player', armies: 1 });
+});
+
 test('los controles táctiles desplazan el mapa ampliado', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'El gesto se prueba con entrada táctil real.');
   await startGame(page, true);

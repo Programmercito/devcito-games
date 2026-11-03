@@ -52,33 +52,70 @@ const ai = await import(moduleUrl(aiCode));
   assert.equal(visited.size, REGIONS.length, 'all regions must be reachable');
 
   const arcs = new Map();
+  const sourceToRegion = new Map(REGIONS.flatMap((region) => region.sourceIds.map((id) => [id, region.id])));
   for (const geometry of topo.objects.countries.geometries) {
     const id = String(geometry.id ?? `X:${geometry.properties.name}`);
-    if (!regionById.has(id)) continue;
+    const regionId = sourceToRegion.get(id);
+    if (!regionId) continue;
     for (const arc of geometry.arcs.flat(Infinity)) {
       const key = arc < 0 ? ~arc : arc;
       const countries = arcs.get(key) ?? new Set();
-      countries.add(id);
+      countries.add(regionId);
       arcs.set(key, countries);
     }
   }
-  for (const countries of arcs.values()) {
+  const vertices = new Map(REGIONS.map((region) => [region.id, new Set(region.rings.flatMap((ring) => ring.map((point) => point.join(','))))]));
+  const edgeKey = (a, b) => a < b ? `${a}|${b}` : `${b}|${a}`;
+  const edges = new Map(REGIONS.map((region) => [region.id, new Set(region.rings.flatMap((ring) =>
+    ring.map((point, i) => edgeKey(point.join(','), ring[(i + 1) % ring.length].join(','))),
+  ))]));
+  let sharedSegments = 0;
+  for (const [arcIndex, countries] of arcs) {
     for (const a of countries) for (const b of countries) {
       if (a !== b) assert.ok(rules.isAdjacent(a, b), `missing land border ${a}–${b}`);
     }
+    const [a, b] = [...countries];
+    if (countries.size !== 2) continue;
+    let x = 0, y = 0, previous = null;
+    for (const [dx, dy] of topo.arcs[arcIndex]) {
+      x += dx;
+      y += dy;
+      const lon = x * topo.transform.scale[0] + topo.transform.translate[0];
+      const lat = y * topo.transform.scale[1] + topo.transform.translate[1];
+      const point = [
+        +(((lon + 180) / 360) * world.WORLD_WIDTH).toFixed(1),
+        +(((90 - lat) / 180) * world.WORLD_HEIGHT).toFixed(1),
+      ].join(',');
+      if (previous && point !== previous &&
+        vertices.get(a).has(previous) && vertices.get(a).has(point) &&
+        vertices.get(b).has(previous) && vertices.get(b).has(point)) {
+        const edge = edgeKey(previous, point);
+        assert.ok(edges.get(a).has(edge) && edges.get(b).has(edge), `mismatched visible border ${a}–${b}`);
+        sharedSegments++;
+      }
+      previous = point;
+    }
   }
+  assert.ok(sharedSegments > 10_000, 'shared visible borders must retain matching geometry');
 
   const random = Math.random;
   try {
-    for (const area of [80_000, 500_000, 2_500_000, 17_000_000]) {
+    for (const area of [0, 80_000, 500_000, 2_500_000, 17_000_000]) {
       Math.random = () => 0;
       const low = rules.initialGarrisonForArea(area);
       Math.random = () => 0.999999;
       const high = rules.initialGarrisonForArea(area);
-      assert.ok(low <= high, `random range failed for ${area}`);
       const base = rules.garrisonForArea(area);
-      assert.equal(low, Math.max(2, Math.round(base * 0.85)));
-      assert.equal(high, Math.max(2, Math.round(base * 1.15)));
+      const variation = Math.max(1, Math.ceil(base * 0.3));
+      assert.equal(low, Math.max(2, base - variation));
+      assert.equal(high, base + variation);
+      assert.ok(high > low, `initial troops must vary for ${area}`);
+      const outcomes = new Set();
+      for (let i = 0; i < high - low + 1; i++) {
+        Math.random = () => (i + 0.5) / (high - low + 1);
+        outcomes.add(rules.initialGarrisonForArea(area));
+      }
+      assert.deepEqual([...outcomes], Array.from({ length: high - low + 1 }, (_, i) => low + i));
     }
   } finally {
     Math.random = random;
@@ -163,6 +200,18 @@ const ai = await import(moduleUrl(aiCode));
   assert.equal(rules.previewAttack(state, '496', '643').willCapture, true);
 
   for (const side of ['player', 'ai']) {
+    const battle = rules.createGame(side, 1);
+    for (const region of REGIONS) for (const neighbor of ADJACENCY[region.id]) {
+      battle.regions[region.id] = { owner: side, armies: 7 };
+      battle.regions[neighbor] = { owner: null, armies: 6 };
+      battle.strikers = [region.id];
+      battle.acted = [];
+      assert.ok(rules.canAttack(battle, region.id, neighbor), `${side} cannot attack ${region.id}–${neighbor}`);
+      assert.ok(rules.performAttack(battle, region.id, neighbor).willCapture, `${side} cannot capture ${region.id}–${neighbor}`);
+    }
+  }
+
+  for (const side of ['player', 'ai']) {
     const thresholds = rules.createGame(side, 1);
     thresholds.regions['068'] = { owner: side, armies: 1 };
     thresholds.regions['600'] = { owner: null, armies: 1 };
@@ -211,6 +260,7 @@ const ai = await import(moduleUrl(aiCode));
     rules.endTurn(game);
     rules.endTurn(game);
     assert.ok(game.strikers.includes('600'), 'conquests join the next turn');
+    assert.ok(rules.canAttack(game, '600', '032'), 'conquests can attack on the next turn');
   }
 
   for (const first of ['player', 'ai']) {
@@ -232,5 +282,5 @@ const ai = await import(moduleUrl(aiCode));
     }
   }
 
-  console.log(`Strategy checks passed: ${REGIONS.length} connected, playable regions and all surviving land borders.`);
+  console.log(`Strategy checks passed: ${REGIONS.length} connected regions, inherited land borders, and attacks in both directions.`);
 }

@@ -526,15 +526,15 @@ export class WorldScene extends Phaser.Scene {
     const w = this.screenToWorld(sx, sy);
     for (let i = REGIONS.length - 1; i >= 0; i--) {
       const r = REGIONS[i];
-      const label = this.labels.get(r.id);
-      if (label && ((label.name.visible && label.name.getBounds().contains(sx, sy)) ||
-        (label.army.visible && label.army.getBounds().contains(sx, sy)))) return r.id;
-    }
-    for (let i = REGIONS.length - 1; i >= 0; i--) {
-      const r = REGIONS[i];
       for (const ring of r.rings) {
         if (polygonContains(ring, w.x, w.y)) return r.id;
       }
+    }
+    for (let i = REGIONS.length - 1; i >= 0; i--) {
+      const r = REGIONS[i];
+      const label = this.labels.get(r.id);
+      if (label && ((label.name.visible && label.name.getBounds().contains(sx, sy)) ||
+        (label.army.visible && label.army.getBounds().contains(sx, sy)))) return r.id;
     }
     return null;
   }
