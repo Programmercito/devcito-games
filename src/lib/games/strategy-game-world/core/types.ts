@@ -10,8 +10,15 @@ export interface RegionState {
 export interface GameState {
   turn: number;
   current: FactionId;
-  /** Regions that already attacked this turn (each may strike once). */
+  /** Regions that already used their one attack this turn. */
   acted: string[];
+  /**
+   * Snapshot of regions owned when the current side's turn BEGAN.
+   * Only these may attack this turn — countries conquered mid-turn join the
+   * attack pool next turn. This is what stopped the 3-homeland AI from
+   * chaining 10 attacks.
+   */
+  strikers: string[];
   regions: Record<string, RegionState>;
   winner: FactionId | null;
   /** Chosen at game start (random, spread apart) — used for the opening log. */

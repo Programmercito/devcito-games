@@ -69,6 +69,7 @@ export class WorldScene extends Phaser.Scene {
   private view = { w: 1280, h: 800 };
 
   private selected: string | null = null;
+  private suicideArmed: string | null = null;
   private hoverId: string | null = null;
   private flash: { from: string; to: string; win: boolean } | null = null;
   private busy = false;
@@ -92,6 +93,7 @@ export class WorldScene extends Phaser.Scene {
     this.makeFxTextures();
     this.state = createGame(this.firstPlayer, this.homelandsCount);
     this.selected = null;
+    this.suicideArmed = null;
     this.hoverId = null;
     this.flash = null;
     this.busy = false;
@@ -156,7 +158,7 @@ export class WorldScene extends Phaser.Scene {
     this.mainBtn = makeButton(this, 0, 0, 'Terminar turno', () => this.onMainButton());
     this.muteBtn = makeButton(this, 0, 0, '🔊', () => {
       this.muteBtn.setText(sfx.toggleMute() ? '🔇' : '🔊');
-    }, { bg: '#1f2937', fontSize: '13px', depth: 14 });
+    }, { fontSize: '13px', depth: 14 });
 
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
     this.handleResize();
@@ -408,8 +410,11 @@ export class WorldScene extends Phaser.Scene {
     if (this.selected) {
       stroke(this.selected, 0xfbbf24, 3);
       for (const n of ADJACENCY[this.selected] ?? []) {
-        if (canAttack(state, this.selected, n)) stroke(n, 0x22d3ee, 2.5);
-        else if (canMove(state, this.selected, n)) stroke(n, 0x34d399, 2);
+        if (canAttack(state, this.selected, n)) {
+          const p = previewAttack(state, this.selected, n);
+          // cyan = sure conquest, red = you'd lose — warn before wasting troops
+          stroke(n, p.willCapture ? 0x22d3ee : 0xef4444, this.suicideArmed === n ? 4 : 2.5, 0.95);
+        } else if (canMove(state, this.selected, n)) stroke(n, 0x34d399, 2);
       }
     } else if (this.hoverId && !this.busy && !this.overlay && state.current === 'player') {
       stroke(this.hoverId, 0xe2e8f0, 1.6, 0.5);
@@ -433,7 +438,7 @@ export class WorldScene extends Phaser.Scene {
     const phaseLabel =
       s.current === 'ai'
         ? 'TURNO DE LA COMPUTADORA'
-        : `Tu turno ${s.turn} — cada país ataca una vez`;
+        : `Tu turno ${s.turn} — ataques: ${s.acted.length}/${s.strikers.length}`;
     this.hud.setText([
       phaseLabel,
       `Tú: ${p.length}/${total} · ${this.armiesOf('player')} ejércitos   |   IA: ${a.length} · ${this.armiesOf('ai')}   |   Producción — Tú: ${incomeFor(s, 'player')} · IA: ${incomeFor(s, 'ai')}`,
@@ -470,6 +475,7 @@ export class WorldScene extends Phaser.Scene {
     const id = this.regionAt(pointer.x, pointer.y);
     if (!id) {
       this.selected = null;
+      this.suicideArmed = null;
       this.drawOverlay();
       return;
     }
@@ -481,6 +487,16 @@ export class WorldScene extends Phaser.Scene {
       if (canAttack(s, this.selected, id)) {
         const from = this.selected;
         const p = previewAttack(s, from, id);
+        if (!p.willCapture && this.suicideArmed !== id) {
+          // First click on a losing target: arm the warning, don't waste troops.
+          this.suicideArmed = id;
+          this.drawOverlay();
+          const need = p.cost + 1 - p.send;
+          this.setLog(`⚠ ${nameOf(id)} te aplasta: envías ${p.send}, su defensa cuesta ${p.cost}. Te faltan ${need} ejércitos — toca de nuevo para atacar igual.`);
+          sfx.repel();
+          return;
+        }
+        this.suicideArmed = null;
         const result = performAttack(s, from, id);
         this.flash = { from, to: id, win: result.willCapture };
         sfx.attack();
@@ -508,17 +524,21 @@ export class WorldScene extends Phaser.Scene {
 
     if (rs.owner === 'player') {
       this.selected = this.selected === id ? null : id;
+      this.suicideArmed = null;
       if (this.selected) {
         sfx.select();
         this.setLog(
-          s.acted.includes(id)
-            ? `${nameOf(id)} ya atacó este turno — elige otra región, mueve tropas o termina el turno.`
-            : `${nameOf(id)}: toca un vecino celeste para atacar, verde para mover.`,
+          !s.strikers.includes(id)
+            ? `${nameOf(id)} fue conquistada este turno — podrá atacar desde el próximo.`
+            : s.acted.includes(id)
+              ? `${nameOf(id)} ya usó su ataque este turno — elige otra región, mueve tropas o termina el turno.`
+              : `${nameOf(id)}: celeste = atacar y ganar · rojo = te falta gente · verde = mover tropas.`,
         );
       }
       this.drawOverlay();
     } else {
       this.selected = null;
+      this.suicideArmed = null;
       this.drawOverlay();
     }
   }
@@ -534,6 +554,7 @@ export class WorldScene extends Phaser.Scene {
     const s = this.state;
     if (s.current !== 'player' || this.busy) return;
     this.selected = null;
+    this.suicideArmed = null;
     sfx.turn();
     endTurn(s); // now current === 'ai', its income auto-deploys
     this.redraw();
@@ -687,11 +708,11 @@ export class WorldScene extends Phaser.Scene {
       this,
       width / 2 - 118,
       btnY,
-      '↻ Revancha',
+      'REVANCHA',
       () => this.scene.start('World', { first: this.firstPlayer, homelands: this.homelandsCount }),
-      { bg: '#0ea5e9', color: '#04121f' },
+      { style: 'primary' },
     );
-    makeButton(this, width / 2 + 118, btnY, 'Menú', () => this.scene.start('Menu'), { bg: '#1f2937' });
+    makeButton(this, width / 2 + 118, btnY, 'MENU', () => this.scene.start('Menu'));
   }
 }
 

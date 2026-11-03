@@ -33,18 +33,22 @@ const feats = feature(topo, topo.objects.countries).features.filter(
 );
 
 // ── geometry helpers (lon/lat) ─────────────────────────────────────
-const kmLat = H / 180; // deg lat → px; px→km via earth circumference
-const PX_TO_KM = 40030 / H; // equator length in px ≈ 40030 km
 
+/**
+ * TRUE spherical area of a lon/lat ring (Chamberlain–Duquette).
+ * Naive projected area lies by 5x for high-latitude countries — with
+ * equirectangular pixels France looked bigger than Bolivia. Never again.
+ */
+const R_EARTH = 6371;
 function ringAreaKm2(ring) {
-  let s = 0;
+  let acc = 0;
   for (let i = 0; i < ring.length; i++) {
-    const [x1, y1] = proj(ring[i]);
-    const [x2, y2] = proj(ring[(i + 1) % ring.length]);
-    const latK = Math.cos((ring[i][1] * Math.PI) / 180);
-    s += x1 * y2 * latK - x2 * y1 * latK;
+    const [lon1, lat1] = ring[i];
+    const [lon2, lat2] = ring[(i + 1) % ring.length];
+    acc += ((lon2 - lon1) * Math.PI) / 180 *
+      (2 + Math.sin((lat1 * Math.PI) / 180) + Math.sin((lat2 * Math.PI) / 180));
   }
-  return Math.abs(s / 2) * PX_TO_KM * PX_TO_KM;
+  return Math.abs(acc) * R_EARTH * R_EARTH / 2;
 }
 function centroidOf(rings) {
   let x = 0, y = 0, w = 0;
@@ -211,18 +215,46 @@ for (const r of byId.values()) {
   r.neighbors = new Set([...r.neighbors].filter((n) => byId.has(n)));
 }
 
-// ── sea links: ensure every region has ≥2 neighbours (islands!) ────
+// ── sea links: ensure every region has ≥3 neighbours (islands!) ────
 for (const r of byId.values()) {
-  while (r.neighbors.size < 2) {
+  while (r.neighbors.size < 3) {
     const cand = [...byId.values()]
       .filter((o) => o.id !== r.id && !r.neighbors.has(o.id))
       .sort((a, b) => dist(a.center, r.center) - dist(b.center, r.center))[0];
-    if (!cand || dist(cand.center, r.center) > 900) break; // none plausible (exclaves)
+    if (!cand || dist(cand.center, r.center) > 1100) break; // none plausible (exclaves)
     r.neighbors.add(cand.id);
     cand.neighbors.add(r.id);
   }
 }
 function dist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+
+// ── curated sea lanes (strait/short-crossing attacks like classic Risk) ─
+const LANE_PAIRS = [
+  ['United Kingdom', 'France'],
+  ['United Kingdom', 'Norway'],
+  ['United Kingdom', 'Denmark'],
+  ['Spain', 'Morocco'],
+  ['Italy', 'Libya'],
+  ['United States of America', 'Cuba'],
+  ['Mexico', 'Cuba'],
+  ['Saudi Arabia', 'Egypt'],
+  ['Yemen', 'Somalia'],
+  ['Japan', 'China'],
+  ['South Korea', 'China'],
+  ['Turkey', 'Turkmenistan'],
+  ['Russia', 'United States of America'], // Bering
+];
+{
+  const byName = new Map([...byId.values()].map((r) => [r.name, r]));
+  for (const [na, nb] of LANE_PAIRS) {
+    const a = byName.get(na);
+    const b = byName.get(nb);
+    if (a && b && a !== b) {
+      a.neighbors.add(b.id);
+      b.neighbors.add(a.id);
+    }
+  }
+}
 
 // ── curated sea routes: the world graph must be ONE component ──────
 const SEA_ROUTES = [
@@ -293,7 +325,17 @@ for (const r of byId.values()) {
 }
 
 const regions = [...byId.values()].sort((a, b) => b.area - a.area);
-const powerOf = (area) => (area > 4_000_000 ? 4 : area > 1_600_000 ? 3 : area > 500_000 ? 2 : 1);
+// fine 1..8 tiers by real area so size differences are always visible
+const powerOf = (area) => (
+  area > 10_000_000 ? 8
+  : area > 5_000_000 ? 7
+  : area > 2_500_000 ? 6
+  : area > 1_200_000 ? 5
+  : area > 600_000 ? 4
+  : area > 250_000 ? 3
+  : area > 80_000 ? 2
+  : 1
+);
 
 // ── continent lookup for surviving regions ─────────────────────────
 for (const r of regions) {
@@ -328,8 +370,10 @@ export interface RegionData {
   id: string;
   name: string;
   continent: ContinentId;
-  /** 1..4 — bigger nations garrison more. */
+  /** 1..8 coarse tier (kept for tie-breaking). */
   power: number;
+  /** REAL country area in km² — the source of truth for proportional troops. */
+  area: number;
   /** One or more polygon rings (islands), world coords. */
   rings: [number, number][][];
   center: [number, number];
@@ -341,7 +385,7 @@ export const WORLD_HEIGHT = ${H};
 export const REGIONS: RegionData[] = [`);
 for (const r of regions) {
   const rings = r.rings.map((ring) => `[[${ring.map((p) => p.join(',')).join('],[')}]]`).join(',');
-  lines.push(`  { id: '${r.id}', name: '${r.name.replace(/'/g, "’")}', continent: '${r.continent}', power: ${powerOf(r.area)}, center: [${r.center.map((v) => v.toFixed(0)).join(',')}], rings: [${rings}] },`);
+  lines.push(`  { id: '${r.id}', name: '${r.name.replace(/'/g, "’")}', continent: '${r.continent}', power: ${powerOf(r.area)}, area: ${Math.round(r.area)}, center: [${r.center.map((v) => v.toFixed(0)).join(',')}], rings: [${rings}] },`);
 }
 lines.push(`];
 
@@ -381,3 +425,4 @@ const outPath = path.resolve('src/lib/games/strategy-game-world/data/world.ts');
 fs.writeFileSync(outPath, lines.join('\n'), 'utf8');
 const pointCount = regions.reduce((s, r) => s + r.rings.reduce((n, ring) => n + ring.length, 0), 0);
 console.log(`regions: ${regions.length}, total points: ${pointCount}, file KB: ${(fs.statSync(outPath).size / 1024).toFixed(0)}`);
+

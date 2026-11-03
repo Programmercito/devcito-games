@@ -1,24 +1,29 @@
 import Phaser from 'phaser';
 import { makeButton, type UiButton } from './ui';
+import { REGIONS, WORLD_HEIGHT, WORLD_WIDTH } from '../data/world';
 import { sfx } from '../core/audio';
 import type { FactionId } from '../core/types';
 
 type View = 'title' | 'setup';
 
 /**
- * Title screen: animated starfield + glowing logo → setup view where you
- * choose the size of your starting empire (1-5 countries) and who moves first.
+ * Title & setup screens. Design language: deep gradient sky, the world map
+ * as a faint silhouette backdrop (the subject IS the map), flat letterspaced
+ * typography, ghost/primary buttons from ui.ts. No emoji glyphs (font tofu).
  */
 export class MenuScene extends Phaser.Scene {
   constructor() {
     super({ key: 'Menu' });
   }
 
-  private stars!: Phaser.GameObjects.Graphics;
-  private orbs!: Phaser.GameObjects.Graphics;
+  private pickCount = 3;
+  private pickFirst: FactionId | 'random' = 'player';
+
+  private bgArt!: Phaser.GameObjects.Graphics;
+  private eyebrow!: Phaser.GameObjects.Text;
   private title!: Phaser.GameObjects.Text;
   private tagline!: Phaser.GameObjects.Text;
-  private glowLine!: Phaser.GameObjects.Graphics;
+  private divider!: Phaser.GameObjects.Graphics;
   private playBtn!: UiButton;
 
   private heading!: Phaser.GameObjects.Text;
@@ -31,136 +36,177 @@ export class MenuScene extends Phaser.Scene {
   private goBtn!: UiButton;
   private backBtn!: UiButton;
 
-  private pickCount = 3;
-  private pickFirst: FactionId | 'random' = 'player';
-
   create(): void {
-    const { width, height } = this.scale;
+    this.bgArt = this.add.graphics().setDepth(-2);
+    this.paintBackdrop();
 
-    // Deep-space backdrop: gradient-ish stacked panels + stars + drifting orbs.
-    const sky = this.add.graphics().setDepth(-2);
-    sky.fillGradientStyle(0x0a1230, 0x0a1230, 0x081020, 0x081020, 1, 1, 1, 1);
-    sky.fillRect(0, 0, width, height);
+    const { width: w, height: h } = this.scale;
+    const cx = w / 2;
+    const cy = h / 2;
 
-    this.orbs = this.add.graphics().setDepth(-1);
-    this.orbs.fillStyle(0x1d4ed8, 0.2).fillCircle(width * 0.16, height * 0.3, Math.min(160, height * 0.24));
-    this.orbs.fillStyle(0x0ea5e9, 0.1).fillCircle(width * 0.85, height * 0.68, Math.min(220, height * 0.32));
-    this.orbs.fillStyle(0xa78bfa, 0.09).fillCircle(width * 0.62, height * 0.14, Math.min(120, height * 0.2));
-    this.tweens.add({ targets: this.orbs, alpha: 0.5, duration: 2600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-
-    this.stars = this.add.graphics().setDepth(-1);
-    for (let i = 0; i < 90; i++) {
-      const a = 0.08 + Math.random() * 0.5;
-      this.stars.fillStyle(0xdbeafe, a).fillCircle(Math.random() * width, Math.random() * height, Math.random() < 0.85 ? 1 : 2);
-    }
-    this.tweens.add({ targets: this.stars, alpha: { from: 0.5, to: 1 }, duration: 1900, yoyo: true, repeat: -1 });
-
-    const cy = height / 2;
-    this.title = this.add
-      .text(width / 2, cy - 140, 'CONQUISTA MUNDIAL', {
+    this.eyebrow = this.add
+      .text(cx, cy - 150, 'ESTRATEGIA GLOBAL POR TURNOS', {
         fontFamily: 'Sora, sans-serif',
-        fontSize: '54px',
-        fontStyle: 'bold',
-        color: '#f1f5f9',
-        stroke: '#1e3a8a',
-        strokeThickness: 10,
+        fontSize: '12px',
+        color: '#5b7ba6',
+        letterSpacing: 6,
       })
       .setOrigin(0.5)
-      .setShadow(0, 0, '#22d3ee', 28, true, true)
       .setDepth(10);
-    this.tweens.add({ targets: this.title, scale: { from: 1, to: 1.03 }, duration: 2200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
+    this.title = this.add
+      .text(cx, cy - 104, 'CONQUISTA MUNDIAL', {
+        fontFamily: 'Sora, sans-serif',
+        fontSize: '52px',
+        fontStyle: 'bold',
+        color: '#f8fafc',
+        letterSpacing: 3,
+      })
+      .setOrigin(0.5)
+      .setDepth(10);
+    this.tweens.add({ targets: this.title, alpha: { from: 0.82, to: 1 }, duration: 2400, yoyo: true, repeat: -1 });
 
     this.tagline = this.add
-      .text(width / 2, cy - 78, '208 países reales · un imperio · un destino', {
+      .text(cx, cy - 52, `${REGIONS.length} países reales · un imperio · un destino`, {
         fontFamily: 'Inter, sans-serif',
-        fontSize: '17px',
-        color: '#38bdf8',
+        fontSize: '15px',
+        color: '#7dd3fc',
+        letterSpacing: 2,
       })
       .setOrigin(0.5)
       .setDepth(10);
 
-    this.glowLine = this.add.graphics().setDepth(10);
-    this.tweens.add({ targets: this.glowLine, alpha: { from: 0.35, to: 1 }, duration: 1400, yoyo: true, repeat: -1 });
+    this.divider = this.add.graphics().setDepth(10);
+    this.divider.fillGradientStyle(0x38bdf8, 0x38bdf8, 0x38bdf8, 0x38bdf8, 0.9, 0, 0, 0.9);
+    this.divider.fillRect(cx - 80, cy - 34, 160, 2);
 
-    this.playBtn = makeButton(this, width / 2, cy + 30, '▶  J U G A R', () => {
+    this.playBtn = makeButton(this, cx, cy + 44, 'J U G A R', () => {
       sfx.select();
       this.setView('setup');
-    }, { fontSize: '24px', bg: '#0ea5e9', color: '#04121f' });
+    }, { fontSize: '22px', style: 'primary', letterSpacing: 4 });
 
-    // ── setup view objects ──
+    // ── setup view ──
     this.heading = this.add
-      .text(width / 2, cy - 170, 'ARMA TU IMPERIO', {
+      .text(cx, cy - 170, 'ARMA TU IMPERIO', {
         fontFamily: 'Sora, sans-serif',
-        fontSize: '30px',
+        fontSize: '28px',
         fontStyle: 'bold',
-        color: '#e2e8f0',
+        color: '#f1f5f9',
+        letterSpacing: 5,
       })
       .setOrigin(0.5)
       .setDepth(10);
 
     this.countLabel = this.add
-      .text(width / 2, cy - 108, 'Países con los que empiezas', { fontFamily: 'Inter, sans-serif', fontSize: '14px', color: '#94a3b8' })
+      .text(cx, cy - 118, 'PAÍSES CON LOS QUE EMPIEZAS', {
+        fontFamily: 'Inter, sans-serif',
+        fontSize: '12px',
+        color: '#64748b',
+        letterSpacing: 3,
+      })
       .setOrigin(0.5)
       .setDepth(10);
 
-    const chipX = (i: number) => width / 2 + (i - 2) * 64;
     for (let i = 0; i < 5; i++) {
       const n = i + 1;
-      const chip = makeButton(this, chipX(i), cy - 64, `${n}`, () => {
+      const chip = makeButton(this, cx + (i - 2) * 66, cy - 76, `${n}`, () => {
         this.pickCount = n;
         this.refreshChips();
         sfx.select();
-      }, { bg: '#1e3a8a', fontSize: '16px' });
+      }, { fontSize: '16px' });
       this.chips.push(chip);
     }
-    this.refreshChips();
 
     this.whoLabel = this.add
-      .text(width / 2, cy + 2, '¿Quién conquista primero?', { fontFamily: 'Inter, sans-serif', fontSize: '14px', color: '#94a3b8' })
+      .text(cx, cy + 4, '¿QUIÉN CONQUISTA PRIMERO?', {
+        fontFamily: 'Inter, sans-serif',
+        fontSize: '12px',
+        color: '#64748b',
+        letterSpacing: 3,
+      })
       .setOrigin(0.5)
       .setDepth(10);
 
-    this.btnVos = makeButton(this, width / 2 - 168, cy + 44, 'TÚ', () => this.setFirst('player'), { bg: '#1d4ed8' });
-    this.btnCpu = makeButton(this, width / 2, cy + 44, 'COMPUTADORA', () => this.setFirst('ai'), { bg: '#991b1b' });
-    this.btnAzar = makeButton(this, width / 2 + 172, cy + 44, 'AZAR', () => this.setFirst('random'), { bg: '#7c5c14' });
+    this.btnVos = makeButton(this, cx - 180, cy + 44, 'TÚ', () => this.setFirst('player'));
+    this.btnCpu = makeButton(this, cx, cy + 44, 'COMPUTADORA', () => this.setFirst('ai'));
+    this.btnAzar = makeButton(this, cx + 186, cy + 44, 'AZAR', () => this.setFirst('random'));
 
-    this.goBtn = makeButton(this, width / 2, cy + 116, '⚔  ¡A CONQUISTAR!', () => {
+    this.goBtn = makeButton(this, cx, cy + 118, 'A CONQUISTAR', () => {
       sfx.turn();
       const first =
         this.pickFirst === 'random' ? (Math.random() < 0.5 ? 'player' : 'ai') : this.pickFirst;
       this.scene.start('World', { first, homelands: this.pickCount });
-    }, { fontSize: '19px', bg: '#059669', color: '#03150d' });
+    }, { fontSize: '18px', style: 'primary', letterSpacing: 3 });
 
-    this.backBtn = makeButton(this, width / 2, cy + 168, '← Volver', () => this.setView('title'), {
-      fontSize: '13px',
-      bg: '#1f2937',
+    this.backBtn = makeButton(this, cx, cy + 172, 'VOLVER', () => this.setView('title'), {
+      fontSize: '12px',
+      letterSpacing: 3,
     });
 
-    this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+    this.scale.on(Phaser.Scale.Events.RESIZE, this.paintBackdrop, this);
     this.setView('title');
   }
 
   shutdown(): void {
-    this.scale.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+    this.scale.off(Phaser.Scale.Events.RESIZE, this.paintBackdrop, this);
   }
 
-  private setFirst(f: FactionId | 'random'): void {
+  /** Gradient sky + world silhouette + sparse stars — redrawn on resize. */
+  private paintBackdrop(): void {
+    const { width: w, height: h } = this.scale;
+    const g = this.bgArt;
+    g.clear();
+
+    g.fillGradientStyle(0x060a16, 0x060a16, 0x0d1a33, 0x0d1a33, 1, 1, 1, 1);
+    g.fillRect(0, 0, w, h);
+
+    // two soft accent blooms
+    g.fillStyle(0x0ea5e9, 0.05);
+    g.fillCircle(w * 0.18, h * 0.22, Math.min(240, h * 0.34));
+    g.fillStyle(0x6366f1, 0.05);
+    g.fillCircle(w * 0.84, h * 0.7, Math.min(300, h * 0.42));
+
+    // world silhouette, fitted to the screen
+    const s = Math.min((w * 0.94) / WORLD_WIDTH, (h * 0.94) / WORLD_HEIGHT);
+    const ox = (w - WORLD_WIDTH * s) / 2;
+    const oy = (h - WORLD_HEIGHT * s) / 2;
+    g.fillStyle(0x13233f, 0.6);
+    for (const r of REGIONS) {
+      for (const ring of r.rings) {
+        const pts = ring.map(([x, y]) => new Phaser.Geom.Point(ox + x * s, oy + y * s));
+        if (pts.length >= 3) g.fillPoints(pts, true);
+      }
+    }
+
+    // stars
+    for (let i = 0; i < 60; i++) {
+      g.fillStyle(0xdbeafe, 0.05 + Math.random() * 0.3);
+      g.fillCircle(Math.random() * w, Math.random() * h, Math.random() < 0.8 ? 1 : 1.6);
+    }
+  }
+
+  private setFirst(f: FactionId | 'random', silent = false): void {
     this.pickFirst = f;
-    sfx.select();
-    this.btnVos.setAlpha(f === 'player' ? 1 : 0.45);
-    this.btnCpu.setAlpha(f === 'ai' ? 1 : 0.45);
-    this.btnAzar.setAlpha(f === 'random' ? 1 : 0.45);
+    if (!silent) sfx.select();
+    this.btnVos.setSelected(f === 'player');
+    this.btnCpu.setSelected(f === 'ai');
+    this.btnAzar.setSelected(f === 'random');
   }
 
   private refreshChips(): void {
-    this.chips.forEach((c, i) => c.setScale(i + 1 === this.pickCount ? 1.18 : 0.92));
+    this.chips.forEach((c, i) => {
+      const on = i + 1 === this.pickCount;
+      c.setSelected(on);
+      c.setScale(on ? 1.12 : 1);
+    });
   }
 
   private setView(view: View): void {
     const on = view === 'title';
+    this.eyebrow.setVisible(on);
     this.title.setVisible(on);
     this.tagline.setVisible(on);
-    this.glowLine.setVisible(on);
+    this.divider.setVisible(on);
     this.playBtn.setVisible(on);
     this.heading.setVisible(!on);
     this.countLabel.setVisible(!on);
@@ -172,26 +218,6 @@ export class MenuScene extends Phaser.Scene {
     this.goBtn.setVisible(!on);
     this.backBtn.setVisible(!on);
     this.refreshChips();
-    this.setFirst(this.pickFirst);
-    this.handleResize();
-  }
-
-  private handleResize(): void {
-    const { width, height } = this.scale;
-    const cy = height / 2;
-    this.title.setPosition(width / 2, Math.max(cy - 140, 70));
-    this.tagline.setPosition(width / 2, Math.max(cy - 140, 70) + 62);
-    this.glowLine.clear();
-    this.glowLine.fillStyle(0x22d3ee, 0.8).fillRoundedRect(width / 2 - 70, Math.max(cy - 140, 70) + 94, 140, 3, 2);
-    this.playBtn.setPosition(width / 2, cy + 30);
-    this.heading.setPosition(width / 2, cy - 170);
-    this.countLabel.setPosition(width / 2, cy - 108);
-    this.chips.forEach((c, i) => c.setPosition(width / 2 + (i - 2) * 64, cy - 64));
-    this.whoLabel.setPosition(width / 2, cy + 2);
-    this.btnVos.setPosition(width / 2 - 168, cy + 44);
-    this.btnCpu.setPosition(width / 2, cy + 44);
-    this.btnAzar.setPosition(width / 2 + 172, cy + 44);
-    this.goBtn.setPosition(width / 2, cy + 116);
-    this.backBtn.setPosition(width / 2, cy + 168);
+    this.setFirst(this.pickFirst, true);
   }
 }
