@@ -2,107 +2,246 @@
 import Layout from '../components/Layout.astro';
 import GameCard from '../components/GameCard.astro';
 import { games } from '../data/games';
+
+const features = [
+  {
+    icon: '🌐',
+    title: '100% en la web',
+    text: 'Cada juego corre directo en tu navegador, en cualquier dispositivo. No instalás nada.',
+  },
+  {
+    icon: '🎲',
+    title: 'Todos los géneros',
+    text: 'Estrategia, arcade, puzles, aventura… una colección de juegos de todo tipo que no para de crecer.',
+  },
+  {
+    icon: '⚡',
+    title: 'Un clic y a jugar',
+    text: 'Sin filas, sin cuentas raras, sin fricción. Entrás, elegís y ya estás dentro.',
+  },
+];
+
+const genres = ['Estrategia', 'Arcade', 'Puzles', 'RPG', 'Aventura', 'Plataformas', 'Torres', 'Carreras', 'Simulación'];
 ---
 
 <Layout
-  title="DevCito Games — Juegos web gratis"
-  description="Una colección de juegos web hechos con amor por DevCito. Estrategia, acción y más, directo en tu navegador."
+  title="DevCito Games — Juegos de todo tipo en tu navegador"
+  description="DevCito Games: juegos de todo tipo en plataforma web. Estrategia, arcade, puzles y más, gratis y directo en tu navegador."
 >
   <main>
     <!-- Hero -->
     <section class="hero">
-      <div class="hero-glow" aria-hidden="true"></div>
-      <p class="hero-kicker">Una colección de juegos web</p>
-      <h1 class="hero-title">
-        DevCito<span class="hero-accent">Games</span>
-      </h1>
-      <p class="hero-subtitle">
-        Juegos gratuitos que corren directo en tu navegador. Sin descargas,
-        sin cuentas raras, sin publicidad invasiva. Solo juegos, hechos con ❤️
-        por la comunidad de <a href="https://devcito.org">DevCito</a>.
-      </p>
-      <div class="hero-actions">
-        <a href="#juegos" class="btn btn-primary">Ver los juegos</a>
-        <a href="https://devcito.org" target="_blank" rel="noopener" class="btn btn-ghost">
-          Conocé DevCito
-        </a>
+      <div class="stars stars-a" aria-hidden="true"></div>
+      <div class="stars stars-b" aria-hidden="true"></div>
+      <div class="orb orb-a" aria-hidden="true"></div>
+      <div class="orb orb-b" aria-hidden="true"></div>
+
+      <div class="hero-content">
+        <p class="hero-kicker" data-reveal>Plataforma web de juegos</p>
+        <h1 class="hero-title" data-reveal style="--reveal-delay: 0.08s">
+          DevCito<span class="hero-accent">Games</span>
+        </h1>
+        <p class="hero-subtitle" data-reveal style="--reveal-delay: 0.16s">
+          Juegos de todo tipo, directo en tu navegador. Estrategia, arcade, puzles
+          y más en una sola plataforma: sin descargas, sin instalaciones eternas.
+          Entrás y jugás.
+        </p>
+        <div class="hero-actions" data-reveal style="--reveal-delay: 0.24s">
+          <a href="#juegos" class="btn btn-primary">Ver los juegos</a>
+          <a href="https://devcito.org" target="_blank" rel="noopener" class="btn btn-ghost">
+            Conocé DevCito
+          </a>
+        </div>
       </div>
+
+      <!-- Genre marquee -->
+      <div class="marquee" aria-hidden="true">
+        <div class="marquee-track">
+          <span class="marquee-group">
+            {genres.map((g) => <em>{g}</em>)}
+          </span>
+          <span class="marquee-group">
+            {genres.map((g) => <em>{g}</em>)}
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features">
+      {features.map((f, i) => (
+        <article class="feature" data-reveal style={`--reveal-delay: ${i * 0.12}s`}>
+          <span class="feature-icon">{f.icon}</span>
+          <h3>{f.title}</h3>
+          <p>{f.text}</p>
+        </article>
+      ))}
     </section>
 
     <!-- Games -->
     <section id="juegos" class="games-section">
-      <div class="section-head">
-        <h2>Los juegos</h2>
-        <p>Cada juego se hace con Phaser y se juega en el navegador.</p>
+      <div class="section-head" data-reveal>
+        <h2>La lista</h2>
+        <p>Todos los juegos de la plataforma, en un solo lugar.</p>
       </div>
       <div class="games-grid">
-        {games.map((game) => <GameCard game={game} />)}
+        {games.map((game, i) => (
+          <div data-reveal style={`--reveal-delay: ${i * 0.12}s`}>
+            <GameCard game={game} />
+          </div>
+        ))}
       </div>
     </section>
   </main>
+
+  <script>
+    const targets = document.querySelectorAll<HTMLElement>('[data-reveal]');
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            io.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.12 },
+    );
+    targets.forEach((el) => io.observe(el));
+  </script>
 </Layout>
 
 <style>
+  /* ---------- Hero ---------- */
   .hero {
     position: relative;
+    overflow: hidden;
     text-align: center;
-    padding: 6rem 1.5rem 5rem;
+    padding: 6.5rem 1.5rem 0;
   }
 
-  .hero-glow {
+  .hero-content {
+    position: relative;
+    z-index: 1;
+    max-width: 56rem;
+    margin: 0 auto;
+    padding-bottom: 4.5rem;
+  }
+
+  /* starfield: two tiled dot layers drifting at different speeds */
+  .stars {
     position: absolute;
-    inset: -20% -10% auto;
-    height: 100%;
-    background:
-      radial-gradient(40% 50% at 50% 0%, rgba(56, 189, 248, 0.18), transparent 70%),
-      radial-gradient(30% 40% at 30% 10%, rgba(167, 139, 250, 0.16), transparent 70%);
+    inset: -50%;
+    background-repeat: repeat;
     pointer-events: none;
+  }
+
+  .stars-a {
+    background-image:
+      radial-gradient(1px 1px at 22px 34px, rgba(226, 232, 240, 0.9), transparent),
+      radial-gradient(1px 1px at 78px 92px, rgba(125, 211, 252, 0.8), transparent),
+      radial-gradient(1.5px 1.5px at 130px 55px, rgba(226, 232, 240, 0.7), transparent),
+      radial-gradient(1px 1px at 165px 120px, rgba(167, 139, 250, 0.8), transparent),
+      radial-gradient(1px 1px at 45px 150px, rgba(226, 232, 240, 0.6), transparent);
+    background-size: 190px 190px;
+    animation: drift-a 90s linear infinite, twinkle 5s ease-in-out infinite;
+  }
+
+  .stars-b {
+    background-image:
+      radial-gradient(1.5px 1.5px at 60px 20px, rgba(125, 211, 252, 0.9), transparent),
+      radial-gradient(1px 1px at 120px 80px, rgba(226, 232, 240, 0.7), transparent),
+      radial-gradient(2px 2px at 30px 110px, rgba(167, 139, 250, 0.75), transparent),
+      radial-gradient(1px 1px at 150px 140px, rgba(226, 232, 240, 0.8), transparent);
+    background-size: 240px 240px;
+    animation: drift-b 140s linear infinite, twinkle 7s ease-in-out infinite reverse;
+  }
+
+  @keyframes drift-a {
+    to { transform: translate3d(-120px, 90px, 0); }
+  }
+
+  @keyframes drift-b {
+    to { transform: translate3d(140px, -110px, 0); }
+  }
+
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.9; }
+    50% { opacity: 0.4; }
+  }
+
+  /* floating glow orbs */
+  .orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(70px);
+    pointer-events: none;
+    animation: float 12s ease-in-out infinite;
+  }
+
+  .orb-a {
+    width: 340px;
+    height: 340px;
+    left: -6%;
+    top: 12%;
+    background: rgba(56, 189, 248, 0.16);
+  }
+
+  .orb-b {
+    width: 300px;
+    height: 300px;
+    right: -4%;
+    top: 34%;
+    background: rgba(167, 139, 250, 0.16);
+    animation-delay: -6s;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-34px) scale(1.08); }
   }
 
   .hero-kicker {
     display: inline-block;
-    padding: 0.35rem 0.9rem;
-    border: 1px solid var(--border);
+    padding: 0.38rem 1rem;
+    border: 1px solid rgba(56, 189, 248, 0.35);
     border-radius: 999px;
-    font-size: 0.85rem;
-    letter-spacing: 0.12em;
+    font-size: 0.82rem;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: var(--text-muted);
-    background: var(--bg-card);
-    margin-bottom: 1.75rem;
+    color: var(--accent-cyan);
+    background: rgba(56, 189, 248, 0.06);
+    margin-bottom: 2rem;
   }
 
   .hero-title {
-    font-size: clamp(2.75rem, 8vw, 5.5rem);
+    font-size: clamp(3rem, 9vw, 6.2rem);
     font-weight: 800;
-    line-height: 1.05;
-    letter-spacing: -0.03em;
-    margin: 0 0 1.5rem;
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+    margin: 0 0 1.6rem;
   }
 
   .hero-accent {
     display: block;
-    background: var(--accent-gradient);
+    background: linear-gradient(90deg, #38bdf8, #a78bfa, #22d3ee, #38bdf8);
+    background-size: 300% auto;
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+    animation: shine 6s linear infinite;
+  }
+
+  @keyframes shine {
+    to { background-position: 300% center; }
   }
 
   .hero-subtitle {
-    max-width: 42rem;
-    margin: 0 auto 2.5rem;
-    font-size: 1.15rem;
-    line-height: 1.7;
+    max-width: 44rem;
+    margin: 0 auto 2.6rem;
+    font-size: 1.2rem;
+    line-height: 1.75;
     color: var(--text-muted);
-  }
-
-  .hero-subtitle a {
-    color: var(--accent-cyan);
-    text-decoration: none;
-  }
-
-  .hero-subtitle a:hover {
-    text-decoration: underline;
   }
 
   .hero-actions {
@@ -112,8 +251,110 @@ import { games } from '../data/games';
     flex-wrap: wrap;
   }
 
+  /* ---------- Marquee ---------- */
+  .marquee {
+    position: relative;
+    z-index: 1;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 0.85rem 0;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.015);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  }
+
+  .marquee-track {
+    display: flex;
+    width: max-content;
+    animation: scroll 26s linear infinite;
+  }
+
+  .marquee:hover .marquee-track {
+    animation-play-state: paused;
+  }
+
+  .marquee-group {
+    display: flex;
+    align-items: center;
+  }
+
+  .marquee-group em {
+    font-style: normal;
+    padding: 0 1.6rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    white-space: nowrap;
+  }
+
+  .marquee-group em::after {
+    content: '◆';
+    margin-left: 3.2rem;
+    font-size: 0.55rem;
+    color: var(--accent-violet);
+    vertical-align: middle;
+  }
+
+  @keyframes scroll {
+    to { transform: translateX(-50%); }
+  }
+
+  /* ---------- Features ---------- */
+  .features {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 5rem 1.5rem 2.5rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.4rem;
+  }
+
+  .feature {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--bg-card);
+    padding: 1.8rem 1.6rem;
+    transition: border-color 0.3s ease, transform 0.3s ease;
+  }
+
+  .feature:hover {
+    border-color: rgba(167, 139, 250, 0.5);
+    transform: translateY(-3px);
+  }
+
+  .feature-icon {
+    display: inline-block;
+    font-size: 1.9rem;
+    margin-bottom: 0.9rem;
+    animation: bob 3.2s ease-in-out infinite;
+  }
+
+  .feature:nth-child(2) .feature-icon { animation-delay: -1s; }
+  .feature:nth-child(3) .feature-icon { animation-delay: -2s; }
+
+  @keyframes bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+  }
+
+  .feature h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1.15rem;
+  }
+
+  .feature p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    line-height: 1.6;
+  }
+
+  /* ---------- Games ---------- */
   .games-section {
-    padding: 3rem 1.5rem 6rem;
+    padding: 3.5rem 1.5rem 7rem;
     max-width: 1080px;
     margin: 0 auto;
   }
@@ -123,8 +364,9 @@ import { games } from '../data/games';
   }
 
   .section-head h2 {
-    font-size: 2rem;
+    font-size: 2.2rem;
     margin: 0 0 0.5rem;
+    letter-spacing: -0.02em;
   }
 
   .section-head p {
@@ -134,7 +376,11 @@ import { games } from '../data/games';
 
   .games-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 1.5rem;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1.6rem;
+  }
+
+  .games-grid > div {
+    height: 100%;
   }
 </style>

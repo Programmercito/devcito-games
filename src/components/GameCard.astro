@@ -9,13 +9,13 @@ interface Props {
 const { game } = Astro.props;
 const href = `/juegos/${game.slug}`;
 const playable = game.status === 'available';
+const accentStyle = `background: ${game.accent}`;
+const isStrategy = game.slug === 'strategy-game-world';
 ---
 
 <a class="game-card" href={href}>
   <div class="card-art">
-    {game.slug === 'strategy-game-world'
-      ? <StrategyWorld />
-      : <div class="art-fallback" style={`background: ${game.accent}`)} />}
+    {isStrategy ? <StrategyWorld /> : <div class="art-fallback" style={accentStyle} />}
 
     <span class:list={['badge', playable ? 'badge-play' : 'badge-soon']}>
       <span class="badge-dot" aria-hidden="true"></span>
