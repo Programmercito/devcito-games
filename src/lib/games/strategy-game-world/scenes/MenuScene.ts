@@ -31,6 +31,7 @@ export class MenuScene extends Phaser.Scene {
   private btnCpu!: UiButton;
   private btnAzar!: UiButton;
   private goBtn!: UiButton;
+  private crazyBtn!: UiButton;
   private backBtn!: UiButton;
 
   create(): void {
@@ -93,6 +94,14 @@ export class MenuScene extends Phaser.Scene {
       const first = this.pickFirst === 'random' ? (Math.random() < 0.5 ? 'player' : 'ai') : this.pickFirst;
       this.scene.start('World', { first, homelands: this.pickCount });
     }, { fontSize: '15px', style: 'primary', letterSpacing: 1 });
+    this.crazyBtn = makeButton(this, 0, 0, '🔥  MODO LOCO · IA vs IA', () => {
+      sfx.turn();
+      this.scene.start('World', {
+        first: Math.random() < 0.5 ? 'player' : 'ai',
+        homelands: this.pickCount,
+        spectate: true,
+      });
+    }, { fontSize: '13px', style: 'danger', letterSpacing: 1 });
     this.backBtn = makeButton(this, 0, 0, '←  VOLVER', () => this.setView('title'), {
       fontSize: '12px', letterSpacing: 1,
     });
@@ -109,7 +118,7 @@ export class MenuScene extends Phaser.Scene {
     const mobile = w < 680;
     const cx = w / 2;
     const cy = h / 2;
-    const step = Math.min(1, h / 430);
+    const step = Math.min(1, h / 490);
     this.brand.setPosition(24, 19);
     this.edition.setPosition(w - 24, 19).setVisible(w >= 500);
     if (mobile) {
@@ -141,8 +150,9 @@ export class MenuScene extends Phaser.Scene {
       button.setPosition(left + button.width / 2, cy + 42 * step);
       left += button.width + 6;
     }
-    this.goBtn.setPosition(cx, cy + 109 * step);
-    this.backBtn.setPosition(cx, cy + 164 * step);
+    this.goBtn.setPosition(cx, cy + 102 * step);
+    this.crazyBtn.setPosition(cx, cy + 162 * step);
+    this.backBtn.setPosition(cx, cy + 212 * step);
     for (const text of [this.eyebrow, this.title, this.tagline, this.footer, this.heading, this.setupIntro, this.countLabel, this.whoLabel]) {
       text.setScale(Math.min(1, (w - 48) / text.width));
     }
@@ -185,12 +195,14 @@ export class MenuScene extends Phaser.Scene {
     if (this.view === 'setup') {
       g.fillStyle(0x040d17, 0.7).fillRect(0, 0, w, h);
       const panelW = Math.min(w - 20, 600);
-      const panelH = Math.min(h - 12, 405);
+      const panelH = Math.min(h - 12, 480);
       const x = (w - panelW) / 2;
       const y = (h - panelH) / 2;
       g.fillStyle(0x0a1c29, 0.98).fillRoundedRect(x, y, panelW, panelH, 16);
       g.lineStyle(1, 0x67939a, 0.38).strokeRoundedRect(x, y, panelW, panelH, 16);
       g.fillStyle(0xe9b85f, 0.9).fillRect(w / 2 - 30, y, 60, 2);
+      const step = Math.min(1, h / 490);
+      g.lineStyle(1, 0x67939a, 0.3).lineBetween(w / 2 - 90, h / 2 + 132 * step, w / 2 + 90, h / 2 + 132 * step);
     }
   }
 
@@ -225,6 +237,7 @@ export class MenuScene extends Phaser.Scene {
     this.btnCpu.setVisible(!title);
     this.btnAzar.setVisible(!title);
     this.goBtn.setVisible(!title);
+    this.crazyBtn.setVisible(!title);
     this.backBtn.setVisible(!title);
     this.refreshChips();
     this.setFirst(this.pickFirst, true);

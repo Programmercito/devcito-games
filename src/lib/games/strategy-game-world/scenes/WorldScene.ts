@@ -40,6 +40,7 @@ const OWNER_LABEL: Record<FactionId | 'neutral', string> = {
 interface WorldSceneData {
   first: FactionId;
   homelands?: number;
+  spectate?: boolean;
 }
 
 /**
@@ -93,10 +94,15 @@ export class WorldScene extends Phaser.Scene {
   private zoomInBtn!: Phaser.GameObjects.Text;
   private zoomOutBtn!: Phaser.GameObjects.Text;
   private overlay = false;
+  private spectate = false;
+  private speed = 1;
+  private speedBtn?: Phaser.GameObjects.Text;
 
   init(data: WorldSceneData): void {
     this.firstPlayer = data.first ?? 'player';
     this.homelandsCount = Phaser.Math.Clamp(data.homelands ?? 3, 1, 5);
+    this.spectate = !!data.spectate;
+    this.speed = 1;
   }
 
   create(): void {
@@ -180,6 +186,15 @@ export class WorldScene extends Phaser.Scene {
     }, { fontSize: '13px', depth: 14 });
     this.zoomOutBtn = makeButton(this, 0, 0, '−', () => this.zoomBy(1 / 1.5), { depth: 14, paddingY: 14 });
     this.zoomInBtn = makeButton(this, 0, 0, '+', () => this.zoomBy(1.5), { depth: 14, paddingY: 14 });
+    this.speedBtn = undefined;
+    if (this.spectate) {
+      this.speedBtn = makeButton(this, 0, 0, 'VELOCIDAD x1', () => {
+        this.speed = this.speed >= 4 ? 1 : this.speed * 2;
+        this.speedBtn?.setText(`VELOCIDAD x${this.speed}`);
+        sfx.select();
+      }, { fontSize: '12px', depth: 14 });
+      this.mainBtn.setVisible(false);
+    }
     // Touch screens zoom by pinching; the buttons only stay for mouse/trackpad users.
     this.input.addPointer(1);
     this.pinching = false;
@@ -203,7 +218,10 @@ export class WorldScene extends Phaser.Scene {
     this.updateHud();
 
     const homelands = this.state.initialHomelands.player.map(nameOf).join(' · ');
-    if (this.state.current === 'ai') {
+    if (this.spectate) {
+      this.setLog(`MODO LOCO: IA AZUL (${homelands}) vs IA ROJA. Solo mira… pellizca o usa la rueda para acercar.`);
+      this.runAiTurn();
+    } else if (this.state.current === 'ai') {
       this.setLog(`Tus países: ${homelands}. Empieza la computadora…`);
       this.runAiTurn();
     } else {
@@ -312,6 +330,7 @@ export class WorldScene extends Phaser.Scene {
     this.hud.setWordWrapWidth(Math.max(100, width - 130));
     this.log.setPosition(width / 2, height - 80);
     this.mainBtn.setPosition(width - 110, height - 26);
+    this.speedBtn?.setPosition(width - 110, height - 26);
     this.muteBtn.setPosition(width - 58, 28);
     this.zoomOutBtn.setPosition(36, height - 26);
     this.zoomInBtn.setPosition(90, height - 26);
@@ -340,7 +359,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private onDragStart(pointer: Phaser.Input.Pointer): void {
-    if (this.busy || this.overlay) return;
+    if ((this.busy && !this.spectate) || this.overlay) return;
     if (this.input.pointer1.isDown && this.input.pointer2.isDown) {
       this.startPinch();
       return;
@@ -349,7 +368,7 @@ export class WorldScene extends Phaser.Scene {
     this.dragMoved = false;
     this.aimFrom = null;
     // Dragging from one of your own countries aims an order; elsewhere it pans.
-    if (this.state.current === 'player') {
+    if (this.state.current === 'player' && !this.spectate) {
       const id = this.regionAt(pointer.x, pointer.y);
       if (id && this.state.regions[id].owner === 'player') this.aimFrom = id;
     }
@@ -386,7 +405,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private onPointerMove(pointer: Phaser.Input.Pointer): void {
-    if (this.busy || this.overlay) return;
+    if ((this.busy && !this.spectate) || this.overlay) return;
     if (this.pinching) {
       if (this.input.pointer1.isDown && this.input.pointer2.isDown) this.onPinchMove();
       return;
@@ -620,19 +639,22 @@ export class WorldScene extends Phaser.Scene {
     const p = ownedRegions(s, 'player');
     const a = ownedRegions(s, 'ai');
     const total = REGIONS.length;
-    const phaseLabel =
-      s.current === 'ai'
+    const phaseLabel = this.spectate
+      ? `MODO LOCO · turno ${s.turn} · juega la IA ${s.current === 'player' ? 'AZUL' : 'ROJA'}`
+      : s.current === 'ai'
         ? 'TURNO DE LA COMPUTADORA'
         : `Tu turno ${s.turn} — ataques: ${s.acted.length}/${s.strikers.length}`;
+    const me = this.spectate ? 'AZUL' : 'TÚ';
+    const them = this.spectate ? 'ROJA' : 'IA';
     this.hud.setText(this.view.w < 700 ? [
       phaseLabel,
-      `TÚ ${p.length} países · ${this.armiesOf('player')} tropas · +${incomeFor(s, 'player')}`,
-      `IA ${a.length} países · ${this.armiesOf('ai')} tropas · +${incomeFor(s, 'ai')}`,
+      `${me} ${p.length} países · ${this.armiesOf('player')} tropas · +${incomeFor(s, 'player')}`,
+      `${them} ${a.length} países · ${this.armiesOf('ai')} tropas · +${incomeFor(s, 'ai')}`,
     ] : [
       phaseLabel,
-      `TÚ  ${p.length}/${total} países · ${this.armiesOf('player')} tropas · +${incomeFor(s, 'player')}    |    IA  ${a.length} países · ${this.armiesOf('ai')} tropas · +${incomeFor(s, 'ai')}`,
+      `${me}  ${p.length}/${total} países · ${this.armiesOf('player')} tropas · +${incomeFor(s, 'player')}    |    ${them}  ${a.length} países · ${this.armiesOf('ai')} tropas · +${incomeFor(s, 'ai')}`,
     ]);
-    this.mainBtn.setVisible(s.current === 'player' && !this.busy);
+    this.mainBtn.setVisible(!this.spectate && s.current === 'player' && !this.busy);
     this.drawUiPanels();
   }
 
@@ -699,7 +721,7 @@ export class WorldScene extends Phaser.Scene {
       }
       return;
     }
-    if (this.busy || this.overlay || this.state.current !== 'player') return;
+    if (this.busy || this.overlay || this.spectate || this.state.current !== 'player') return;
     if ([this.mainBtn, this.muteBtn, this.zoomInBtn, this.zoomOutBtn].some(
       (button) => button.visible && button.getBounds().contains(pointer.x, pointer.y),
     )) return;
@@ -948,7 +970,8 @@ export class WorldScene extends Phaser.Scene {
   private runAiTurn(): void {
     this.busy = true;
     this.updateHud();
-    const actions = planAiTurn(cloneState(this.state));
+    const side = this.state.current;
+    const actions = planAiTurn(cloneState(this.state), side);
     this.playAiStep(actions, 0);
   }
 
@@ -958,31 +981,32 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     if (i >= actions.length) {
-      this.time.delayedCall(350, () => this.finishAiTurn());
+      this.time.delayedCall(350 / this.speed, () => this.finishAiTurn());
       return;
     }
     const a = actions[i];
     this.applyAiAction(a);
     this.redraw();
     this.updateHud();
-    const wait = a.type === 'attack' ? 760 : 420;
+    const wait = (a.type === 'attack' ? 760 : 420) / this.speed;
     this.time.delayedCall(wait, () => this.playAiStep(actions, i + 1));
   }
 
   private applyAiAction(a: AiAction): void {
     const s = this.state;
+    const who = this.spectate ? (s.current === 'player' ? 'IA azul' : 'IA roja') : 'IA';
     if (a.type === 'attack') {
       const send = previewAttack(s, a.from, a.to).send;
       const r = performAttack(s, a.from, a.to);
       this.startFlash(a.from, a.to, r.willCapture, send, r.willCapture ? [0xef4444, 0xf97316, 0xfecaca] : null);
       sfx.attack();
       if (r.willCapture) sfx.capture();
-      this.setLog(`IA: ${nameOf(a.from)} ataca ${nameOf(a.to)} — ${r.willCapture ? 'la conquista' : 'fracasa'}.`);
+      this.setLog(`${who}: ${nameOf(a.from)} ataca ${nameOf(a.to)} — ${r.willCapture ? 'la conquista' : 'fracasa'}.`);
     } else {
       moveArmies(s, a.from, a.to, a.amount);
       this.startFlash(a.from, a.to, true, a.amount);
       sfx.aiTick();
-      this.setLog(`IA mueve ${a.amount} ejércitos hacia el frente (${nameOf(a.to)}).`);
+      this.setLog(`${who} mueve ${a.amount} ejércitos hacia el frente (${nameOf(a.to)}).`);
     }
   }
 
@@ -991,6 +1015,10 @@ export class WorldScene extends Phaser.Scene {
     this.busy = false;
     const s = this.state;
     s.winner = checkWinner(s);
+    // Stalemate guard for spectator games: the bigger empire wins.
+    if (this.spectate && !s.winner && s.turn >= 120) {
+      s.winner = ownedRegions(s, 'player').length >= ownedRegions(s, 'ai').length ? 'player' : 'ai';
+    }
     if (s.winner) {
       this.redraw();
       this.showGameOver();
@@ -1000,6 +1028,12 @@ export class WorldScene extends Phaser.Scene {
     sfx.turn();
     this.redraw();
     this.updateHud();
+    if (this.spectate) {
+      this.time.delayedCall(500 / this.speed, () => {
+        if (!this.overlay) this.runAiTurn();
+      });
+      return;
+    }
     const where = res.places.map(nameOf).join(', ');
     this.setLog(res.income > 0
       ? `Tu turno ${s.turn}: +${res.income} refuerzos desplegados en ${where}.`
@@ -1012,7 +1046,10 @@ export class WorldScene extends Phaser.Scene {
     this.overlay = true;
     this.busy = true;
     this.mainBtn.setVisible(false);
+    this.speedBtn?.setVisible(false);
     const playerWon = this.state.winner === 'player';
+    const spec = this.spectate;
+    const good = spec || playerWon;
     const { width, height } = this.scale;
 
     const backdrop = this.add
@@ -1023,19 +1060,19 @@ export class WorldScene extends Phaser.Scene {
     this.tweens.add({ targets: backdrop, alpha: 1, duration: 500 });
 
     const title = this.add
-      .text(width / 2, height / 2 - 90, playerWon ? '¡VICTORIA!' : 'DERROTA', {
+      .text(width / 2, height / 2 - 90, spec ? (playerWon ? '¡GANA LA IA AZUL!' : '¡GANA LA IA ROJA!') : playerWon ? '¡VICTORIA!' : 'DERROTA', {
         fontFamily: 'Sora, sans-serif',
-        fontSize: '64px',
+        fontSize: spec ? '44px' : '64px',
         fontStyle: 'bold',
-        color: playerWon ? '#fbbf24' : '#ef4444',
-        stroke: playerWon ? '#92400e' : '#7f1d1d',
+        color: good ? '#fbbf24' : '#ef4444',
+        stroke: good ? '#92400e' : '#7f1d1d',
         strokeThickness: 10,
       })
       .setOrigin(0.5)
       .setScale(2.6)
       .setAlpha(0)
       .setDepth(31)
-      .setShadow(0, 0, playerWon ? '#fbbf24' : '#ef4444', 30, true, true);
+      .setShadow(0, 0, good ? '#fbbf24' : '#ef4444', 30, true, true);
     this.tweens.add({
       targets: title,
       scale: 1,
@@ -1050,7 +1087,9 @@ export class WorldScene extends Phaser.Scene {
       .text(
         width / 2,
         height / 2 - 16,
-        playerWon
+        spec
+          ? `Terminó en ${this.state.turn} turnos.\nAzul: ${ownedRegions(this.state, 'player').length} países · Roja: ${ownedRegions(this.state, 'ai').length} países.`
+          : playerWon
           ? `Derrotaste a la computadora en ${this.state.turn} turnos.\nControlas ${ownedRegions(this.state, 'player').length} de ${total} países.`
           : `La computadora ganó en ${this.state.turn} turnos.\nTú controlabas ${ownedRegions(this.state, 'player').length} países.`,
         {
@@ -1065,7 +1104,7 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(31);
     this.tweens.add({ targets: stats, alpha: 1, duration: 500, delay: 600 });
 
-    if (playerWon) {
+    if (good) {
       sfx.victory();
       const confetti = this.add.particles(0, -20, 'confetti', {
         x: { min: 0, max: width },
@@ -1089,7 +1128,7 @@ export class WorldScene extends Phaser.Scene {
       width / 2 - 118,
       btnY,
       'REVANCHA',
-      () => this.scene.start('World', { first: this.firstPlayer, homelands: this.homelandsCount }),
+      () => this.scene.start('World', { first: this.firstPlayer, homelands: this.homelandsCount, spectate: this.spectate }),
       { style: 'primary' },
     );
     makeButton(this, width / 2 + 118, btnY, 'MENU', () => this.scene.start('Menu'));
