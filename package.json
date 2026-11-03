@@ -8,6 +8,8 @@
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
+    "test:strategy": "node scripts/test-strategy.mjs",
+    "test:e2e": "playwright test",
     "astro": "astro"
   },
   "dependencies": {
@@ -16,6 +18,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.12",
+    "@playwright/test": "^1.64.1",
     "topojson-client": "^3.1.0",
     "typescript": "^5.6.0",
     "world-atlas": "^2.0.2"

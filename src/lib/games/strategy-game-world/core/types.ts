@@ -10,6 +10,8 @@ export interface RegionState {
 export interface GameState {
   turn: number;
   current: FactionId;
+  /** True until the first faction finishes its opening turn. */
+  openingTurn: boolean;
   /** Regions that already used their one attack this turn. */
   acted: string[];
   /**
@@ -21,7 +23,7 @@ export interface GameState {
   strikers: string[];
   regions: Record<string, RegionState>;
   winner: FactionId | null;
-  /** Chosen at game start (random, spread apart) — used for the opening log. */
+  /** Chosen uniformly at game start — used for the opening log. */
   initialHomelands: Record<FactionId, string[]>;
 }
 

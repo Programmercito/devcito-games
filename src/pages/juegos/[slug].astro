@@ -14,14 +14,14 @@ const isPlayable = game.status === 'available';
 <Layout title={`${game.title} — DevCito Games`} description={game.description} chrome={false}>
   <main class="game-page">
     <header class="game-bar">
-      <a href="/" class="back-pill">← <span class="back-text">Volver</span></a>
+      <a href="/" class="back-pill" aria-label="Volver al inicio">← <span class="back-text">Volver</span></a>
 
       <div class="game-heading">
         <h1>{game.title}</h1>
         <span class="genre-pill">{game.genre}</span>
       </div>
 
-      <button id="fullscreen-btn" class="fs-btn" type="button" aria-pressed="false">
+      <button id="fullscreen-btn" class="fs-btn" type="button" aria-pressed="false" aria-label="Pantalla completa">
         ⛶ <span class="fs-text">Pantalla completa</span>
       </button>
     </header>
@@ -63,6 +63,7 @@ const isPlayable = game.status === 'available';
     document.addEventListener('fullscreenchange', () => {
       const on = Boolean(document.fullscreenElement);
       if (fsBtn) fsBtn.setAttribute('aria-pressed', String(on));
+      if (fsBtn) fsBtn.setAttribute('aria-label', on ? 'Salir de pantalla completa' : 'Pantalla completa');
       if (fsText) fsText.textContent = on ? 'Salir' : 'Pantalla completa';
     });
   </script>
@@ -200,6 +201,7 @@ const isPlayable = game.status === 'available';
   .game-root :global(canvas) {
     display: block;
     margin: 0 !important;
+    touch-action: none;
   }
 
   .stage-note {

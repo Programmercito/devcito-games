@@ -16,14 +16,9 @@ const areaOf = (id: string): number => regionById.get(id)?.area ?? 100_000;
 /** Peacetime garrison of a neutral: Spain ~6, Bolivia ~8, Brazil ~18, Russia ~25. */
 export const garrisonForArea = (area: number): number =>
   Math.min(30, Math.max(2, Math.round(2 + Math.sqrt(area) / 180)));
-/** Starting side gets its first income now; the other side receives exactly
- * one income when its turn arrives (endTurn) — symmetric, no first-move tax
- * or bonus. Random range (±25%) keeps every game different but still
- * √area-proportional: big beats small always, same rule for both players. */
-export function homeForArea(area: number): number {
-  const base = garrisonForArea(area) + 10 + Math.floor(Math.sqrt(area) / 400);
-  return Math.max(6, Math.round(base * (0.75 + Math.random() * 0.5)));
-}
+/** Initial garrisons vary each game without changing their size-based baseline. */
+export const initialGarrisonForArea = (area: number): number =>
+  Math.max(2, Math.round(garrisonForArea(area) * (0.85 + Math.random() * 0.3)));
 /** Production per country per turn: Brazil 6, Bolivia 3, Spain 1, Russia 9. */
 export const productionForArea = (area: number): number =>
   Math.max(1, Math.round(Math.sqrt(area) / 500));
@@ -38,82 +33,49 @@ export interface IncomeResult {
 }
 
 /**
- * Combat is 1:1 attrition: you win with strictly more troops than the
- * garrison (a tie favors the defender). Intuitive at every scale — with 30
- * vs 25 you DO take Russia, barely (5 left).
+ * A country wins when its total army exceeds the defender's. One troop
+ * remains behind and at least one must occupy a captured country.
  */
 export function attackCost(defense: number): number {
-  return defense;
+  return Math.max(0, defense - 1);
 }
 
 export function createGame(first: FactionId, homelandsPerSide = 3): GameState {
   const regions: GameState['regions'] = {};
   for (const r of REGIONS) {
-    regions[r.id] = { owner: null, armies: garrisonForArea(r.area) };
+    regions[r.id] = { owner: null, armies: initialGarrisonForArea(r.area) };
   }
   const initialHomelands = pickHomelands(homelandsPerSide);
-  // homeland strength is proportional to the country's real area
-  for (const id of initialHomelands.player) regions[id] = { owner: 'player', armies: homeForArea(areaOf(id)) };
-  for (const id of initialHomelands.ai) regions[id] = { owner: 'ai', armies: homeForArea(areaOf(id)) };
+  for (const id of initialHomelands.player) regions[id].owner = 'player';
+  for (const id of initialHomelands.ai) regions[id].owner = 'ai';
 
   const s: GameState = {
     turn: 1,
     current: first,
+    openingTurn: true,
     acted: [],
     strikers: [...initialHomelands[first]],
     regions,
     winner: null,
     initialHomelands,
   };
-  // Only the STARTING side receives its opening income now. The rival's
-  // opening income arrives exactly once via endTurn — symmetric fairness.
-  grantIncome(s, first);
   return s;
 }
 
-/**
- * Random homelands, spread apart: bigger nations only (power ≥ 2), own
- * homelands far from each other, enemy homelands not adjacent but close
- * enough that fronts meet within the first minutes (early-game pressure).
- */
-function pickHomelands(n: number): Record<FactionId, string[]> {
-  const pool = REGIONS.filter((r) => r.area >= 900_000);
-  const dist = (a: typeof pool[number], b: typeof pool[number]) =>
-    Math.hypot(a.center[0] - b.center[0], a.center[1] - b.center[1]);
-  const OWN_MIN = 780;
-  const ENEMY_MIN = 620;
-  const shuffled = (arr: typeof pool) => {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
+/** Draw uniformly without replacement, regardless of location or country size. */
+export function pickHomelands(n: number): Record<FactionId, string[]> {
+  if (!Number.isInteger(n) || n < 1 || n * 2 > REGIONS.length) {
+    throw new RangeError('Invalid number of starting countries per side');
+  }
+  const pool = REGIONS.map((r) => r.id);
+  const draw = (): string => {
+    const index = Math.floor(Math.random() * pool.length);
+    [pool[index], pool[pool.length - 1]] = [pool[pool.length - 1], pool[index]];
+    return pool.pop()!;
   };
-  const takeSpread = (minD: number, taken: Set<string>, avoid: typeof pool) => {
-    const picked: typeof pool = [];
-    const tryPick = (withOwn: boolean, withAvoid: boolean) => {
-      for (const cand of shuffled(pool)) {
-        if (picked.length >= n) return;
-        if (taken.has(cand.id)) continue;
-        if (withOwn && !picked.every((p) => dist(p, cand) >= minD)) continue;
-        if (withAvoid && !avoid.every((e) => dist(e, cand) >= ENEMY_MIN)) continue;
-        picked.push(cand);
-        taken.add(cand.id);
-      }
-    };
-    // strict first, then progressively relaxed until we hit the count
-    tryPick(true, true);
-    tryPick(true, false);
-    tryPick(false, false);
-    return picked;
-  };
-  const taken = new Set<string>();
-  const player = takeSpread(OWN_MIN, taken, []);
-  const ai = takeSpread(OWN_MIN, taken, player);
   return {
-    player: player.map((r) => r.id),
-    ai: ai.map((r) => r.id),
+    player: Array.from({ length: n }, draw),
+    ai: Array.from({ length: n }, draw),
   };
 }
 
@@ -218,7 +180,7 @@ function topCorridors(s: GameState, side: FactionId): string[] {
       const t = s.regions[to];
       if (t.owner === side) continue;
       const need =
-        Math.max(0, attackCost(t.armies) + 1 - s.regions[from].armies) -
+        Math.max(0, attackCost(t.armies) + 2 - s.regions[from].armies) -
         productionForArea(areaOf(to));
       if (!bestPerFrom.has(from) || need < bestPerFrom.get(from)!) bestPerFrom.set(from, need);
     }
@@ -258,7 +220,7 @@ export function performAttack(s: GameState, from: string, to: string): AttackPre
   s.acted.push(from); // that region's one strike is used (hit or miss)
   if (result.willCapture) {
     s.regions[to].owner = s.current;
-    s.regions[to].armies = result.survivors; // the conquest may strike too this turn
+    s.regions[to].armies = result.survivors;
   }
   s.winner = checkWinner(s);
   return result;
@@ -281,14 +243,16 @@ export function moveArmies(s: GameState, from: string, to: string, amount: numbe
   return moved;
 }
 
-/** Switch to the other faction: its income auto-deploys at the front. */
-/** Switch to the other faction: snapshot ITS owned countries as strikers. */
+/** Switch sides; reinforcements begin on each side's second turn. */
 export function endTurn(s: GameState): IncomeResult {
   const next: FactionId = s.current === 'player' ? 'ai' : 'player';
+  const firstTurnForNext = s.openingTurn;
+  s.openingTurn = false;
   s.current = next;
   s.acted = [];
   s.strikers = ownedRegions(s, next);
-  if (next === 'player') s.turn += 1;
+  if (next === 'player' && !firstTurnForNext) s.turn += 1;
+  if (firstTurnForNext) return { income: 0, places: [] };
   return grantIncome(s, next);
 }
 

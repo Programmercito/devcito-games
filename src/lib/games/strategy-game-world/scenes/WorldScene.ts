@@ -26,9 +26,9 @@ import type { AiAction, FactionId, GameState } from '../core/types';
 import { makeButton } from './ui';
 
 const OWNER_FILL: Record<FactionId | 'neutral', number> = {
-  player: 0x1d4ed8,
-  ai: 0xb91c1c,
-  neutral: 0x2b3a52,
+  player: 0x1767a6,
+  ai: 0xa64048,
+  neutral: 0x354c5c,
 };
 
 const OWNER_LABEL: Record<FactionId | 'neutral', string> = {
@@ -43,7 +43,7 @@ interface WorldSceneData {
 }
 
 /**
- * The world board with REAL country geometry (208 Natural Earth regions).
+ * The world board with real country geometry.
  *
  * Viewport model: manual world→screen transform (camX/camY + zoom) — never
  * Phaser camera zoom, which desynchronizes scrollFactor(0) HUD hit areas.
@@ -79,8 +79,12 @@ export class WorldScene extends Phaser.Scene {
 
   private hud!: Phaser.GameObjects.Text;
   private log!: Phaser.GameObjects.Text;
+  private uiPanels!: Phaser.GameObjects.Graphics;
+  private attackHint!: Phaser.GameObjects.Text;
   private mainBtn!: Phaser.GameObjects.Text;
   private muteBtn!: Phaser.GameObjects.Text;
+  private zoomInBtn!: Phaser.GameObjects.Text;
+  private zoomOutBtn!: Phaser.GameObjects.Text;
   private overlay = false;
 
   init(data: WorldSceneData): void {
@@ -100,16 +104,14 @@ export class WorldScene extends Phaser.Scene {
     this.dragging = false;
     this.overlay = false;
 
-    // Open the view centered on the player's first homeland, moderately zoomed.
-    const homeId = this.state.initialHomelands.player[0] ?? this.state.initialHomelands.ai[0];
-    const home = homeId ? regionById.get(homeId) : undefined;
-    this.camX = home ? home.center[0] : WORLD_WIDTH / 2;
-    this.camY = home ? home.center[1] : WORLD_HEIGHT / 2;
-    this.zoom = 2.2;
+    this.camX = WORLD_WIDTH / 2;
+    this.camY = WORLD_HEIGHT / 2;
+    this.zoom = 1;
 
     this.labels = new Map();
     this.fills = this.add.graphics().setDepth(0);
     this.highlights = this.add.graphics().setDepth(1);
+    this.uiPanels = this.add.graphics().setDepth(11);
 
     for (const r of REGIONS) {
       const name = this.add
@@ -140,7 +142,6 @@ export class WorldScene extends Phaser.Scene {
         fontFamily: 'Sora, sans-serif',
         fontSize: '13px',
         color: '#e7ecf5',
-        backgroundColor: '#0b1224d9',
         padding: { x: 12, y: 8 },
       })
       .setDepth(12);
@@ -149,18 +150,34 @@ export class WorldScene extends Phaser.Scene {
       .text(0, 0, 'Arrastra para moverte · rueda para zoom', {
         fontFamily: 'Inter, sans-serif',
         fontSize: '13px',
-        color: '#9fb3d9',
+        color: '#d8eaf0',
+        padding: { x: 12, y: 7 },
         align: 'center',
       })
       .setOrigin(0.5)
       .setDepth(12);
 
-    this.mainBtn = makeButton(this, 0, 0, 'Terminar turno', () => this.onMainButton());
-    this.muteBtn = makeButton(this, 0, 0, '🔊', () => {
-      this.muteBtn.setText(sfx.toggleMute() ? '🔇' : '🔊');
+    this.attackHint = this.add.text(0, 0, '', {
+      fontFamily: 'Sora, sans-serif',
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: '#e9fbff',
+      backgroundColor: '#102d3af2',
+      padding: { x: 12, y: 8 },
+      lineSpacing: 4,
+    }).setDepth(20).setVisible(false);
+
+    this.mainBtn = makeButton(this, 0, 0, 'TERMINAR TURNO', () => this.onMainButton(), { style: 'primary', fontSize: '12px' });
+    this.muteBtn = makeButton(this, 0, 0, 'SONIDO', () => {
+      this.muteBtn.setText(sfx.toggleMute() ? 'SILENCIO' : 'SONIDO');
     }, { fontSize: '13px', depth: 14 });
+    this.zoomOutBtn = makeButton(this, 0, 0, '−', () => this.zoomBy(1 / 1.5), { depth: 14, paddingY: 14 });
+    this.zoomInBtn = makeButton(this, 0, 0, '+', () => this.zoomBy(1.5), { depth: 14, paddingY: 14 });
 
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+    });
     this.handleResize();
 
     this.input.on('pointerdown', this.onDragStart, this);
@@ -176,12 +193,8 @@ export class WorldScene extends Phaser.Scene {
       this.setLog(`Tus países: ${homelands}. Empieza la computadora…`);
       this.runAiTurn();
     } else {
-      this.setLog(`Tus países: ${homelands}. Elige uno y ataca: los refuerzos llegan solos cada turno.`);
+      this.setLog(`Tus países: ${homelands}. Usa + para acercar el mapa. Los refuerzos llegan desde el segundo turno.`);
     }
-  }
-
-  shutdown(): void {
-    this.scale.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
   }
 
   /** Test hooks (used by the E2E harness). */
@@ -281,10 +294,18 @@ export class WorldScene extends Phaser.Scene {
     this.view = { w: width, h: height };
     this.baseS = Math.min(width / WORLD_WIDTH, (height - 56) / WORLD_HEIGHT);
     this.clampCam();
-    this.log.setPosition(width / 2, height - 26);
-    this.mainBtn.setPosition(width - 120, height - 26);
-    this.muteBtn.setPosition(width - 34, 30);
-    if (this.fills) this.redraw();
+    this.log.setWordWrapWidth(Math.max(100, width - 32));
+    this.hud.setWordWrapWidth(Math.max(100, width - 130));
+    this.log.setPosition(width / 2, height - 80);
+    this.mainBtn.setPosition(width - 110, height - 26);
+    this.muteBtn.setPosition(width - 58, 28);
+    this.zoomOutBtn.setPosition(36, height - 26);
+    this.zoomInBtn.setPosition(90, height - 26);
+    this.hud.setFontSize(width < 700 ? 11 : 13);
+    if (this.fills) {
+      this.redraw();
+      this.updateHud();
+    }
   }
 
   private onWheel(pointer: Phaser.Input.Pointer, _over: unknown, _dx: number, dy: number): void {
@@ -293,6 +314,13 @@ export class WorldScene extends Phaser.Scene {
     this.zoom = Phaser.Math.Clamp(this.zoom * (dy < 0 ? 1.2 : 1 / 1.2), 1, 9);
     this.camX = before.x - (pointer.x - this.view.w / 2) / this.s;
     this.camY = before.y - (pointer.y - this.view.h / 2) / this.s;
+    this.clampCam();
+    this.redraw();
+  }
+
+  private zoomBy(factor: number): void {
+    if (this.busy || this.overlay) return;
+    this.zoom = Phaser.Math.Clamp(this.zoom * factor, 1, 9);
     this.clampCam();
     this.redraw();
   }
@@ -307,6 +335,7 @@ export class WorldScene extends Phaser.Scene {
   private onPointerMove(pointer: Phaser.Input.Pointer): void {
     if (this.busy || this.overlay) return;
     if (this.dragging) {
+      this.attackHint.setVisible(false);
       const dx = pointer.x - this.dragLast.x;
       const dy = pointer.y - this.dragLast.y;
       if (!this.dragMoved && Math.hypot(dx, dy) < 6) return;
@@ -325,6 +354,26 @@ export class WorldScene extends Phaser.Scene {
       this.input.setDefaultCursor(id ? 'pointer' : 'default');
       this.drawOverlay();
     }
+    this.updateAttackHint(id, pointer);
+  }
+
+  private updateAttackHint(id: string | null, pointer: Phaser.Input.Pointer): void {
+    if (!id || !this.selected || id === this.selected || !canAttack(this.state, this.selected, id)) {
+      this.attackHint.setVisible(false);
+      return;
+    }
+    const preview = previewAttack(this.state, this.selected, id);
+    const source = this.state.regions[this.selected].armies;
+    this.attackHint.setText(`${nameOf(this.selected)} ${source}  vs  ${nameOf(id)} ${preview.defense}\n${preview.willCapture ? 'VICTORIA PREVISTA' : 'FALTAN TROPAS PARA GANAR'}`);
+    this.attackHint.setColor(preview.willCapture ? '#b9f5ff' : '#ffe3a3');
+    const x = Phaser.Math.Clamp(pointer.x + 18, 8, Math.max(8, this.view.w - this.attackHint.width - 8));
+    let y = Phaser.Math.Clamp(pointer.y + 18, 8, Math.max(8, this.view.h - this.attackHint.height - 8));
+    const logBounds = this.log.getBounds();
+    if (y < logBounds.bottom && y + this.attackHint.height > logBounds.top &&
+      x < logBounds.right && x + this.attackHint.width > logBounds.left) {
+      y = Math.max(8, pointer.y - this.attackHint.height - 18);
+    }
+    this.attackHint.setPosition(x, y).setVisible(true);
   }
 
   // ── rendering ────────────────────────────────────────────────────
@@ -408,12 +457,12 @@ export class WorldScene extends Phaser.Scene {
     };
 
     if (this.selected) {
-      stroke(this.selected, 0xfbbf24, 3);
+      stroke(this.selected, 0xffffff, 3);
       for (const n of ADJACENCY[this.selected] ?? []) {
         if (canAttack(state, this.selected, n)) {
           const p = previewAttack(state, this.selected, n);
-          // cyan = sure conquest, red = you'd lose — warn before wasting troops
-          stroke(n, p.willCapture ? 0x22d3ee : 0xef4444, this.suicideArmed === n ? 4 : 2.5, 0.95);
+          // Amber is an available but currently losing attack, not a blocked border.
+          stroke(n, p.willCapture ? 0x22d3ee : 0xfbbf24, this.suicideArmed === n ? 4 : 2.5, 0.95);
         } else if (canMove(state, this.selected, n)) stroke(n, 0x34d399, 2);
       }
     } else if (this.hoverId && !this.busy && !this.overlay && state.current === 'player') {
@@ -439,11 +488,16 @@ export class WorldScene extends Phaser.Scene {
       s.current === 'ai'
         ? 'TURNO DE LA COMPUTADORA'
         : `Tu turno ${s.turn} — ataques: ${s.acted.length}/${s.strikers.length}`;
-    this.hud.setText([
+    this.hud.setText(this.view.w < 700 ? [
       phaseLabel,
-      `Tú: ${p.length}/${total} · ${this.armiesOf('player')} ejércitos   |   IA: ${a.length} · ${this.armiesOf('ai')}   |   Producción — Tú: ${incomeFor(s, 'player')} · IA: ${incomeFor(s, 'ai')}`,
+      `TÚ ${p.length} países · ${this.armiesOf('player')} tropas · +${incomeFor(s, 'player')}`,
+      `IA ${a.length} países · ${this.armiesOf('ai')} tropas · +${incomeFor(s, 'ai')}`,
+    ] : [
+      phaseLabel,
+      `TÚ  ${p.length}/${total} países · ${this.armiesOf('player')} tropas · +${incomeFor(s, 'player')}    |    IA  ${a.length} países · ${this.armiesOf('ai')} tropas · +${incomeFor(s, 'ai')}`,
     ]);
     this.mainBtn.setVisible(s.current === 'player' && !this.busy);
+    this.drawUiPanels();
   }
 
   private armiesOf(side: FactionId): number {
@@ -452,6 +506,17 @@ export class WorldScene extends Phaser.Scene {
 
   private setLog(msg: string): void {
     this.log.setText(msg);
+    this.drawUiPanels();
+  }
+
+  private drawUiPanels(): void {
+    const g = this.uiPanels.clear();
+    for (const [text, accent] of [[this.hud, this.state.current === 'player' ? 0x54c5d2 : 0xe8756c], [this.log, 0xe4b65f]] as const) {
+      const bounds = text.getBounds();
+      g.fillStyle(0x071723, 0.94).fillRoundedRect(bounds.x, bounds.y, bounds.width, bounds.height, 9);
+      g.lineStyle(1, accent, 0.36).strokeRoundedRect(bounds.x, bounds.y, bounds.width, bounds.height, 9);
+      g.fillStyle(accent, 0.85).fillRoundedRect(bounds.x, bounds.y + 8, 3, Math.max(0, bounds.height - 16), 1);
+    }
   }
 
   // ── player input ─────────────────────────────────────────────────
@@ -459,7 +524,14 @@ export class WorldScene extends Phaser.Scene {
   private regionAt(sx: number, sy: number): string | null {
     if (this.overlay) return null;
     const w = this.screenToWorld(sx, sy);
-    for (const r of REGIONS) {
+    for (let i = REGIONS.length - 1; i >= 0; i--) {
+      const r = REGIONS[i];
+      const label = this.labels.get(r.id);
+      if (label && ((label.name.visible && label.name.getBounds().contains(sx, sy)) ||
+        (label.army.visible && label.army.getBounds().contains(sx, sy)))) return r.id;
+    }
+    for (let i = REGIONS.length - 1; i >= 0; i--) {
+      const r = REGIONS[i];
       for (const ring of r.rings) {
         if (polygonContains(ring, w.x, w.y)) return r.id;
       }
@@ -468,9 +540,13 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private onPointerUp(pointer: Phaser.Input.Pointer): void {
+    this.attackHint.setVisible(false);
     this.dragging = false;
     if (this.dragMoved) return; // that was a pan, not a click
     if (this.busy || this.overlay || this.state.current !== 'player') return;
+    if ([this.mainBtn, this.muteBtn, this.zoomInBtn, this.zoomOutBtn].some(
+      (button) => button.visible && button.getBounds().contains(pointer.x, pointer.y),
+    )) return;
 
     const id = this.regionAt(pointer.x, pointer.y);
     if (!id) {
@@ -492,7 +568,7 @@ export class WorldScene extends Phaser.Scene {
           this.suicideArmed = id;
           this.drawOverlay();
           const need = p.cost + 1 - p.send;
-          this.setLog(`⚠ ${nameOf(id)} te aplasta: envías ${p.send}, su defensa cuesta ${p.cost}. Te faltan ${need} ejércitos — toca de nuevo para atacar igual.`);
+          this.setLog(`${nameOf(id)}: envías ${p.send} contra ${p.defense}. Faltan ${need} tropas para ganar. Espera refuerzos o toca otra vez para atacar igualmente.`);
           sfx.repel();
           return;
         }
@@ -532,12 +608,27 @@ export class WorldScene extends Phaser.Scene {
             ? `${nameOf(id)} fue conquistada este turno — podrá atacar desde el próximo.`
             : s.acted.includes(id)
               ? `${nameOf(id)} ya usó su ataque este turno — elige otra región, mueve tropas o termina el turno.`
-              : `${nameOf(id)}: celeste = atacar y ganar · rojo = te falta gente · verde = mover tropas.`,
+              : rs.armies <= 1
+                ? `${nameOf(id)} necesita al menos 2 tropas para atacar. Espera refuerzos o mueve tropas aquí.`
+              : `${nameOf(id)}: celeste = victoria · dorado = ataque posible, faltan tropas · verde = mover tropas.`,
         );
       }
       this.drawOverlay();
     } else {
-      this.selected = null;
+      if (this.selected) {
+        const from = this.selected;
+        if (!ADJACENCY[from]?.includes(id)) {
+          this.setLog(`${nameOf(id)} no está conectado con ${nameOf(from)}. Elige un territorio marcado.`);
+        } else if (!s.strikers.includes(from)) {
+          this.setLog(`${nameOf(from)} fue conquistado este turno y podrá atacar en el siguiente.`);
+        } else if (s.acted.includes(from)) {
+          this.setLog(`${nameOf(from)} ya atacó este turno. Podrá volver a atacar en el siguiente.`);
+        } else if (s.regions[from].armies <= 1) {
+          this.setLog(`${nameOf(from)} necesita al menos 2 tropas para atacar. Espera refuerzos o mueve tropas aquí.`);
+        }
+        return;
+      }
+      this.setLog(`${nameOf(id)} no es tuyo. Selecciona un país propio para atacar.`);
       this.suicideArmed = null;
       this.drawOverlay();
     }
@@ -556,7 +647,7 @@ export class WorldScene extends Phaser.Scene {
     this.selected = null;
     this.suicideArmed = null;
     sfx.turn();
-    endTurn(s); // now current === 'ai', its income auto-deploys
+    endTurn(s);
     this.redraw();
     this.updateHud();
     this.runAiTurn();
@@ -618,12 +709,14 @@ export class WorldScene extends Phaser.Scene {
       this.showGameOver();
       return;
     }
-    const res = endTurn(s); // back to player, income auto-deploys
+    const res = endTurn(s);
     sfx.turn();
     this.redraw();
     this.updateHud();
     const where = res.places.map(nameOf).join(', ');
-    this.setLog(`Tu turno ${s.turn}: +${res.income} refuerzos desplegados en ${where}.`);
+    this.setLog(res.income > 0
+      ? `Tu turno ${s.turn}: +${res.income} refuerzos desplegados en ${where}.`
+      : 'Tu primer turno: todavía no hay refuerzos. Llegarán en tu siguiente turno.');
   }
 
   // ── game over ────────────────────────────────────────────────────
@@ -671,8 +764,8 @@ export class WorldScene extends Phaser.Scene {
         width / 2,
         height / 2 - 16,
         playerWon
-          ? `Conquistaste los ${total} países en ${this.state.turn} turnos.`
-          : `La IA dominó el mundo en ${this.state.turn} turnos.\nTú controlabas ${ownedRegions(this.state, 'player').length} países.`,
+          ? `Derrotaste a la computadora en ${this.state.turn} turnos.\nControlas ${ownedRegions(this.state, 'player').length} de ${total} países.`
+          : `La computadora ganó en ${this.state.turn} turnos.\nTú controlabas ${ownedRegions(this.state, 'player').length} países.`,
         {
           fontFamily: 'Inter, sans-serif',
           fontSize: '16px',

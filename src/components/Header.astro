@@ -84,4 +84,10 @@ const nav = [
   .nav-links a:hover {
     color: var(--text);
   }
+
+  @media (max-width: 460px) {
+    .nav { flex-wrap: wrap; padding: 0.8rem 1rem; }
+    .nav-links { gap: 1rem; }
+    .nav-links a { font-size: 0.82rem; }
+  }
 </style>

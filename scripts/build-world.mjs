@@ -20,7 +20,7 @@ const topo = require('world-atlas/countries-50m.json');
 const W = 4096;
 const H = 2048;
 const MIN_AREA_KM2 = 45_000; // countries below this merge into smallest neighbour
-const RING_MIN_KM2 = 350; // rings (islands) below this are dropped
+const RING_MIN_KM2 = 1_000; // omit tiny fragments that cannot be played on the map
 const MAX_POINTS_PER_RING = 90;
 
 const proj = ([lon, lat]) => [
@@ -132,7 +132,11 @@ function splitAtSeam(ring) {
       i = (i + 1) % n;
     }
     chain.push([to.S, to.lat]);
-    if (chain.length >= 4) pieces.push(chain);
+    if (chain.length >= 4) {
+      const meanLon = chain.reduce((sum, p) => sum + p[0], 0) / chain.length;
+      const offset = 360 * Math.floor((meanLon + 180) / 360);
+      pieces.push(chain.map(([lon, lat]) => [lon - offset, lat]));
+    }
   }
   return pieces.length ? pieces : [pts];
 }
@@ -199,12 +203,22 @@ const small = [...byId.values()].sort((x, y) => x.area - y.area);
 for (const c of small) {
   if (c.area >= MIN_AREA_KM2 || merged.has(c.id)) continue;
   const nbrs = [...c.neighbors].filter((n) => byId.has(n) && !merged.has(n));
-  if (nbrs.length === 0) continue; // island microstate: keep solo, sea links later
+  if (nbrs.length === 0) {
+    // Tiny isolated islands are not readable or selectable at normal zoom.
+    merged.add(c.id);
+    byId.delete(c.id);
+    continue;
+  }
   const host = nbrs.map((n) => byId.get(n)).sort((x, y) => x.area - y.area)[0];
   host.rings = host.rings.concat(c.rings);
   host.geoRings = host.geoRings.concat(c.geoRings);
   host.area += c.area;
-  c.neighbors.forEach((n) => { if (n !== host.id) host.neighbors.add(n); });
+  c.neighbors.forEach((n) => {
+    if (n === host.id || !byId.has(n)) return;
+    host.neighbors.add(n);
+    byId.get(n).neighbors.delete(c.id);
+    byId.get(n).neighbors.add(host.id);
+  });
   host.neighbors.delete(c.id);
   merged.add(c.id);
   byId.delete(c.id);
@@ -425,4 +439,3 @@ const outPath = path.resolve('src/lib/games/strategy-game-world/data/world.ts');
 fs.writeFileSync(outPath, lines.join('\n'), 'utf8');
 const pointCount = regions.reduce((s, r) => s + r.rings.reduce((n, ring) => n + ring.length, 0), 0);
 console.log(`regions: ${regions.length}, total points: ${pointCount}, file KB: ${(fs.statSync(outPath).size / 1024).toFixed(0)}`);
-

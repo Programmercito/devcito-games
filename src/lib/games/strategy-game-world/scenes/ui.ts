@@ -15,11 +15,12 @@ export interface ButtonOpts {
   style?: ButtonStyle;
   letterSpacing?: number;
   depth?: number;
+  paddingY?: number;
 }
 
 const PALETTE = {
-  ghost: { bg: 0x0e1a2e, border: 0x2a4066, text: '#cbd5e1' },
-  primary: { bg: 0xf59e0b, border: 0xfbbf24, text: '#1a1204' },
+  ghost: { bg: 0x11283a, border: 0x507185, text: '#dcecf2' },
+  primary: { bg: 0xe9b85f, border: 0xffe3a1, text: '#17202a' },
   danger: { bg: 0x7f1d1d, border: 0xb91c1c, text: '#fee2e2' },
   active: { bg: 0x123a5c, border: 0x38bdf8, text: '#e0f2fe' },
 } as const;
@@ -48,7 +49,7 @@ export function makeButton(
       fontStyle: 'bold',
       color: theme.text,
       letterSpacing: opts?.letterSpacing ?? 0,
-      padding: { x: 18, y: 10 },
+      padding: { x: 18, y: opts?.paddingY ?? 12 },
     })
     .setOrigin(0.5)
     .setScrollFactor(0)
@@ -69,6 +70,8 @@ export function makeButton(
     const t = active ? PALETTE.active : theme;
     const alpha = disabled ? 0.35 : 1;
     bg.clear();
+    bg.fillStyle(0x020914, 0.45 * alpha);
+    bg.fillRoundedRect(left, top + 4, w, h, 10);
     bg.fillStyle(t.bg, (style === 'ghost' ? 0.92 : 1) * alpha);
     bg.fillRoundedRect(left, top, w, h, 10);
     bg.lineStyle(1.5, t.border, (hovered && !disabled ? 0.95 : 0.55) * alpha);
