@@ -189,7 +189,8 @@ export class WorldScene extends Phaser.Scene {
     this.speedBtn = undefined;
     if (this.spectate) {
       this.speedBtn = makeButton(this, 0, 0, 'VELOCIDAD x1', () => {
-        this.speed = this.speed >= 4 ? 1 : this.speed * 2;
+        const steps = [1, 2, 4, 6];
+        this.speed = steps[(steps.indexOf(this.speed) + 1) % steps.length];
         this.speedBtn?.setText(`VELOCIDAD x${this.speed}`);
         sfx.select();
       }, { fontSize: '12px', depth: 14 });
@@ -1059,50 +1060,64 @@ export class WorldScene extends Phaser.Scene {
       .setAlpha(0);
     this.tweens.add({ targets: backdrop, alpha: 1, duration: 500 });
 
+    const accent = good ? 0xfbbf24 : 0xef4444;
+    const cardW = Math.min(width - 24, 460);
+    const cardH = 270;
+    const cx = width / 2;
+    const cy = height / 2;
+    const card = this.add.graphics().setDepth(31).setAlpha(0);
+    card.fillStyle(0x0a1c29, 0.97).fillRoundedRect(cx - cardW / 2, cy - cardH / 2, cardW, cardH, 18);
+    card.lineStyle(1, 0x67939a, 0.4).strokeRoundedRect(cx - cardW / 2, cy - cardH / 2, cardW, cardH, 18);
+    card.fillStyle(accent, 0.95).fillRoundedRect(cx - 40, cy - cardH / 2, 80, 3, 1);
+    this.tweens.add({ targets: card, alpha: 1, duration: 400, delay: 100 });
+
+    const titleStr = spec ? (playerWon ? '¡GANA LA IA AZUL!' : '¡GANA LA IA ROJA!') : playerWon ? '¡VICTORIA!' : 'DERROTA';
     const title = this.add
-      .text(width / 2, height / 2 - 90, spec ? (playerWon ? '¡GANA LA IA AZUL!' : '¡GANA LA IA ROJA!') : playerWon ? '¡VICTORIA!' : 'DERROTA', {
+      .text(cx, cy - 78, titleStr, {
         fontFamily: 'Sora, sans-serif',
-        fontSize: spec ? '44px' : '64px',
+        fontSize: spec ? '34px' : '48px',
         fontStyle: 'bold',
-        color: good ? '#fbbf24' : '#ef4444',
-        stroke: good ? '#92400e' : '#7f1d1d',
-        strokeThickness: 10,
+        color: good ? '#fbbf24' : '#f87171',
       })
       .setOrigin(0.5)
-      .setScale(2.6)
       .setAlpha(0)
-      .setDepth(31)
-      .setShadow(0, 0, good ? '#fbbf24' : '#ef4444', 30, true, true);
+      .setDepth(32);
+    const fit = Math.min(1, (cardW - 40) / title.width);
+    title.setScale(fit * 1.8);
     this.tweens.add({
       targets: title,
-      scale: 1,
+      scale: fit,
       alpha: 1,
-      duration: 650,
+      duration: 550,
       ease: 'Back.easeOut',
       delay: 150,
     });
 
     const total = REGIONS.length;
+    const blue = ownedRegions(this.state, 'player').length;
+    const red = ownedRegions(this.state, 'ai').length;
     const stats = this.add
       .text(
-        width / 2,
-        height / 2 - 16,
+        cx,
+        cy - 8,
         spec
-          ? `Terminó en ${this.state.turn} turnos.\nAzul: ${ownedRegions(this.state, 'player').length} países · Roja: ${ownedRegions(this.state, 'ai').length} países.`
+          ? `Terminó en ${this.state.turn} turnos\nAzul ${blue}  ·  Roja ${red}  (de ${total} países)`
           : playerWon
-          ? `Derrotaste a la computadora en ${this.state.turn} turnos.\nControlas ${ownedRegions(this.state, 'player').length} de ${total} países.`
-          : `La computadora ganó en ${this.state.turn} turnos.\nTú controlabas ${ownedRegions(this.state, 'player').length} países.`,
+          ? `Derrotaste a la computadora en ${this.state.turn} turnos\nControlas ${blue} de ${total} países`
+          : `La computadora ganó en ${this.state.turn} turnos\nTú controlabas ${blue} países`,
         {
           fontFamily: 'Inter, sans-serif',
-          fontSize: '16px',
+          fontSize: '15px',
           color: '#cbd5e1',
           align: 'center',
+          lineSpacing: 6,
         },
       )
       .setOrigin(0.5)
       .setAlpha(0)
-      .setDepth(31);
-    this.tweens.add({ targets: stats, alpha: 1, duration: 500, delay: 600 });
+      .setDepth(32);
+    stats.setScale(Math.min(1, (cardW - 40) / stats.width));
+    this.tweens.add({ targets: stats, alpha: 1, duration: 500, delay: 500 });
 
     if (good) {
       sfx.victory();
@@ -1122,16 +1137,20 @@ export class WorldScene extends Phaser.Scene {
       sfx.defeat();
     }
 
-    const btnY = height / 2 + 90;
-    makeButton(
+    const btnY = cy + 82;
+    const again = makeButton(
       this,
-      width / 2 - 118,
+      cx,
       btnY,
       'REVANCHA',
       () => this.scene.start('World', { first: this.firstPlayer, homelands: this.homelandsCount, spectate: this.spectate }),
-      { style: 'primary' },
+      { style: 'primary', depth: 33 },
     );
-    makeButton(this, width / 2 + 118, btnY, 'MENU', () => this.scene.start('Menu'));
+    const menu = makeButton(this, cx, btnY, 'MENU', () => this.scene.start('Menu'), { depth: 33 });
+    const gap = 12;
+    const rowW = again.width + menu.width + gap;
+    again.setPosition(cx - rowW / 2 + again.width / 2, btnY);
+    menu.setPosition(cx + rowW / 2 - menu.width / 2, btnY);
   }
 }
 
