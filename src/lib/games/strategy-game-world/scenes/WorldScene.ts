@@ -133,7 +133,7 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(12);
 
     this.log = this.add
-      .text(0, 0, 'Arrastrá para moverte, rueda para hacer zoom.', {
+      .text(0, 0, 'Arrastra para moverte, rueda para hacer zoom.', {
         fontFamily: 'Inter, sans-serif',
         fontSize: '13px',
         color: '#9fb3d9',
@@ -159,7 +159,7 @@ export class WorldScene extends Phaser.Scene {
       this.setLog('Empieza la computadora…');
       this.runAiTurn();
     } else {
-      this.setLog('Tu turno: elegí una región y atacá. Refuerzos: automáticos por turno.');
+      this.setLog('Tu turno: elige una región y atacá. Refuerzos: automáticos por turno.');
     }
   }
 
@@ -320,11 +320,7 @@ export class WorldScene extends Phaser.Scene {
     const phaseLabel =
       s.current === 'ai'
         ? 'TURNO DE LA COMPUTADORA'
-        : s.campaign === 'done'
-          ? `Tu turno ${s.turn} — ofensiva terminada (mové o pasá)`
-          : typeof s.campaign === 'string'
-            ? `Tu turno ${s.turn} — campaña activa: seguí desde ${nameOf(s.campaign)}`
-            : `Tu turno ${s.turn} — una ofensiva por turno`;
+        : `Tu turno ${s.turn} — cada país ataca una vez`;
     this.hud.setText([
       phaseLabel,
       `Tú: ${p.length}/${total} regiones · IA: ${a.length}   |   Ingreso — Tú: ${incomeFor(s, 'player')} · IA: ${incomeFor(s, 'ai')}`,
@@ -373,7 +369,7 @@ export class WorldScene extends Phaser.Scene {
         this.setLog(
           result.willCapture
             ? `¡${nameOf(id)} es tuyo! Enviaste ${p.send}, bajas ${p.cost}, quedan ${result.survivors}.`
-            : `${nameOf(id)} resiste: perdiste ${p.send}. La ofensiva terminó.`,
+            : `${nameOf(id)} resiste: perdiste ${p.send}.`,
         );
         this.selected = result.willCapture ? id : null;
         this.afterAction();
@@ -381,7 +377,7 @@ export class WorldScene extends Phaser.Scene {
       }
       if (canMove(s, this.selected, id)) {
         const moved = moveArmies(s, this.selected, id, s.regions[this.selected].armies - 1);
-        this.setLog(`Movés ${moved} desde ${nameOf(this.selected)} a ${nameOf(id)}.`);
+        this.setLog(`Mueves ${moved} desde ${nameOf(this.selected)} a ${nameOf(id)}.`);
         this.selected = null;
         this.afterAction();
         return;
@@ -392,9 +388,9 @@ export class WorldScene extends Phaser.Scene {
       this.selected = this.selected === id ? null : id;
       if (this.selected) {
         this.setLog(
-          typeof s.campaign === 'string'
-            ? `La campaña de este turno sigue desde ${nameOf(s.campaign)} — tocá un vecino celeste.`
-            : `${nameOf(id)}: tocá un vecino celeste para atacar, verde para mover.`,
+          s.acted.includes(id)
+            ? `${nameOf(id)} ya atacó este turno — elige otra región, mueve tropas o termina el turno.`
+            : `${nameOf(id)}: toca un vecino celeste para atacar, verde para mover.`,
         );
       }
       this.redraw();

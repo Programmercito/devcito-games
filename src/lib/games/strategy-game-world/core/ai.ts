@@ -1,6 +1,5 @@
 import { ADJACENCY, CONTINENTS, regionById } from '../data/world';
 import {
-  attackCost,
   canAttack,
   cloneState,
   moveArmies,
@@ -16,9 +15,9 @@ import type { AiAction, FactionId, GameState } from './types';
  * kill, enemy land, continent locks, and enough survivors to KEEP pushing),
  * chains conquests through that front, then drags rear troops forward.
  */
-export function planAiTurn(input: GameState): AiAction[] {
+export function planAiTurn(input: GameState, side: FactionId = 'ai'): AiAction[] {
   const s = cloneState(input);
-  const ai: FactionId = 'ai';
+  const ai = side;
   const actions: AiAction[] = [];
 
   let guard = 0;

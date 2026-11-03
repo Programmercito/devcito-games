@@ -25,7 +25,7 @@ export function createGame(first: FactionId): GameState {
   for (const id of PLAYER_HOMELANDS) regions[id] = { owner: 'player', armies: STARTING_ARMIES };
   for (const id of AI_HOMELANDS) regions[id] = { owner: 'ai', armies: STARTING_ARMIES };
 
-  const s: GameState = { turn: 1, current: first, campaign: null, regions, winner: null };
+  const s: GameState = { turn: 1, current: first, acted: [], regions, winner: null };
   grantIncome(s, 'player');
   grantIncome(s, 'ai');
   return s;
@@ -50,43 +50,83 @@ export function incomeFor(s: GameState, side: FactionId): number {
 }
 
 /**
- * Reinforcements are NOT a manual phase: they appear automatically at the
- * start of every side's turn, spread over the frontline regions — cheapest
- * (weakest) target first, so troops flow where conquest is imminent.
+ * Reinforcements are NOT a manual phase: they appear automatically every
+ * turn, concentrated enough to break through but spread over the top
+ * corridors (50/30/20) so a single interior pile can't hoard the war chest.
  */
 export function grantIncome(s: GameState, side: FactionId): number {
   const income = incomeFor(s, side);
-  const fronts = ownedRegions(s, side)
-    .filter((id) => (ADJACENCY[id] ?? []).some((n) => s.regions[n].owner !== side))
-    .sort((a, b) => minFrontCost(s, a, side) - minFrontCost(s, b, side));
-  if (fronts.length === 0) return 0;
-  let i = 0;
-  for (let k = 0; k < income; k++) {
-    s.regions[fronts[i % fronts.length]].armies += 1;
-    i += 1;
+  const owned = ownedRegions(s, side);
+  if (owned.length === 0) return 0;
+
+  const corridors = topCorridors(s, side); // up to 3 distinct front regions
+  const threatened = findThreatened(s, side);
+
+  if (corridors.length === 0) {
+    const dest = threatened.length ? threatened : owned;
+    const richest = dest.sort((a, b) => s.regions[b].armies - s.regions[a].armies)[0];
+    s.regions[richest].armies += income;
+    return income;
   }
+
+  const shares = splitIncome(income, corridors.length);
+  corridors.forEach((id, i) => {
+    s.regions[id].armies += shares[i] ?? 0;
+  });
   return income;
 }
 
-function minFrontCost(s: GameState, id: string, side: FactionId): number {
-  const targets = (ADJACENCY[id] ?? []).filter((n) => s.regions[n].owner !== side);
-  if (targets.length === 0) return Infinity;
-  return Math.min(...targets.map((t) => attackCost(s.regions[t].armies)));
+function splitIncome(income: number, n: number): number[] {
+  if (n === 1) return [income];
+  if (n === 2) return [Math.ceil(income * 0.65), Math.floor(income * 0.35)];
+  const a = Math.ceil(income * 0.5);
+  const b = Math.round(income * 0.3);
+  return [a, b, Math.max(0, income - a - b)];
+}
+
+function findThreatened(s: GameState, side: FactionId): string[] {
+  return ownedRegions(s, side)
+    .filter((id) =>
+      (ADJACENCY[id] ?? []).some((n) => {
+        const e = s.regions[n];
+        return !!e.owner && e.owner !== side && e.armies - 1 > attackCost(s.regions[id].armies);
+      }),
+    )
+    .sort((a, b) => s.regions[a].armies - s.regions[b].armies);
+}
+
+/**
+ * Up to 3 distinct front regions ranked by how close they are to conquering
+ * one of their targets (need = extra troops required). Interior regions
+ * (all neighbours already ours) can't be corridors.
+ */
+function topCorridors(s: GameState, side: FactionId): string[] {
+  const bestPerFrom = new Map<string, number>();
+  for (const from of ownedRegions(s, side)) {
+    for (const to of ADJACENCY[from] ?? []) {
+      const t = s.regions[to];
+      if (t.owner === side) continue;
+      const need = Math.max(0, attackCost(t.armies) + 1 - s.regions[from].armies);
+      if (!bestPerFrom.has(from) || need < bestPerFrom.get(from)!) bestPerFrom.set(from, need);
+    }
+  }
+  return [...bestPerFrom.entries()]
+    .sort((a, b) => a[1] - b[1] || s.regions[b[0]].armies - s.regions[a[0]].armies)
+    .slice(0, 3)
+    .map(([from]) => from);
 }
 
 export function isAdjacent(a: string, b: string): boolean {
   return (ADJACENCY[a] ?? []).includes(b);
 }
 
-/** One campaign per turn: after the first strike you must push from it. */
+/** Each region may strike once per turn — multiple fronts are fine. */
 export function canAttack(s: GameState, from: string, to: string): boolean {
   const src = s.regions[from];
   const dst = s.regions[to];
   if (!src || !dst || src.owner !== s.current || dst.owner === s.current) return false;
   if (src.armies <= 1 || !isAdjacent(from, to)) return false;
-  if (s.campaign === 'done') return false;
-  if (typeof s.campaign === 'string' && s.campaign !== from) return false;
-  return true;
+  return !s.acted.includes(from);
 }
 
 export function previewAttack(s: GameState, from: string, to: string): AttackPreview {
@@ -101,20 +141,13 @@ export function previewAttack(s: GameState, from: string, to: string): AttackPre
 export function performAttack(s: GameState, from: string, to: string): AttackPreview {
   const result = previewAttack(s, from, to);
   s.regions[from].armies = 1;
+  s.acted.push(from);
   if (result.willCapture) {
     s.regions[to].owner = s.current;
-    s.regions[to].armies = result.survivors;
-    s.campaign = to; // the campaign continues only from the conquest
-  } else {
-    s.campaign = 'done'; // a repelled strike burns the turn's offensive
+    s.regions[to].armies = result.survivors; // the conquest may strike again this turn
   }
   s.winner = checkWinner(s);
   return result;
-}
-
-/** Voluntarily end the campaign (e.g. to shuffle troops instead). */
-export function endCampaign(s: GameState): void {
-  if (s.campaign !== 'done') s.campaign = 'done';
 }
 
 export function canMove(s: GameState, from: string, to: string): boolean {
@@ -138,7 +171,7 @@ export function moveArmies(s: GameState, from: string, to: string, amount: numbe
 export function endTurn(s: GameState): void {
   const next: FactionId = s.current === 'player' ? 'ai' : 'player';
   s.current = next;
-  s.campaign = null;
+  s.acted = [];
   if (next === 'player') s.turn += 1;
   grantIncome(s, next);
 }

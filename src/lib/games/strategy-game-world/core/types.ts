@@ -7,17 +7,19 @@ export interface RegionState {
   armies: number;
 }
 
+export interface FactionState {
+  treasury: number;
+}
+
 export interface GameState {
   turn: number;
   current: FactionId;
-  /**
-   * One campaign per turn: null = free to start one; a region id = the last
-   * conquest, and the next attack may only launch from there; 'done' = the
-   * turn's offensive is over (a failed attack, or voluntary stop).
-   */
-  campaign: string | null | 'done';
+  /** Regions that already attacked this turn (each may strike once). */
+  acted: string[];
   regions: Record<string, RegionState>;
   winner: FactionId | null;
+  /** Chosen at game start (random, spread apart) — used for the opening log. */
+  initialHomelands: Record<FactionId, string[]>;
 }
 
 export interface AttackPreview {

@@ -20,8 +20,8 @@ const topo = require('world-atlas/countries-50m.json');
 const W = 4096;
 const H = 2048;
 const MIN_AREA_KM2 = 45_000; // countries below this merge into smallest neighbour
-const RING_MIN_KM2 = 700; // rings (islands) below this are dropped
-const MAX_POINTS_PER_RING = 55;
+const RING_MIN_KM2 = 350; // rings (islands) below this are dropped
+const MAX_POINTS_PER_RING = 90;
 
 const proj = ([lon, lat]) => [
   ((lon + 180) / 360) * W,
@@ -78,33 +78,114 @@ function simplify(ring, maxPoints) {
   return pts.map(([lon, lat]) => { const [x, y] = proj([lon, lat]); return [+x.toFixed(1), +y.toFixed(1)]; });
 }
 
+/**
+ * Split a lon/lat ring at the antimeridian (±180°) so no segment spans the
+ * whole map. Each piece is anchored on the seam on both ends, so closing it
+ * is a short chord along the seam instead of a band across the world.
+ * (Without this, Russia renders as a red ribbon from Europe to Alaska.)
+ */
+function splitAtSeam(ring) {
+  const pts = ring.slice();
+  if (pts.length > 2 && pts[0][0] === pts.at(-1)[0] && pts[0][1] === pts.at(-1)[1]) pts.pop();
+  const n = pts.length;
+  if (n < 4) return [pts];
+
+  // Unroll the ring into a continuous longitude frame.
+  const xs = [];
+  let off = 0;
+  for (let i = 0; i < n; i++) {
+    xs.push([pts[i][0] + off, pts[i][1]]);
+    const d = pts[(i + 1) % n][0] - pts[i][0];
+    if (d > 180) off -= 360;
+    else if (d < -180) off += 360;
+  }
+
+  // Every segment that crosses an odd multiple of 180 is a cut.
+  const cuts = [];
+  for (let i = 0; i < n; i++) {
+    const a = xs[i];
+    const b = xs[(i + 1) % n];
+    for (const S of [-540, -180, 180, 540]) {
+      if ((a[0] < S && b[0] >= S) || (a[0] > S && b[0] <= S)) {
+        const t = (S - a[0]) / (b[0] - a[0]);
+        cuts.push({ i, S, lat: a[1] + (b[1] - a[1]) * t });
+        break;
+      }
+    }
+  }
+  if (cuts.length < 2 || cuts.length % 2 !== 0) return cuts.length ? [pts] : [pts];
+
+  // Each pair of consecutive cuts bounds one closed piece.
+  const pieces = [];
+  for (let k = 0; k < cuts.length; k++) {
+    const from = cuts[k];
+    const to = cuts[(k + 1) % cuts.length];
+    const chain = [[from.S, from.lat]];
+    let i = (from.i + 1) % n;
+    for (let guard = 0; guard <= n; guard++) {
+      chain.push(xs[i]);
+      if (i === to.i) break;
+      i = (i + 1) % n;
+    }
+    chain.push([to.S, to.lat]);
+    if (chain.length >= 4) pieces.push(chain);
+  }
+  return pieces.length ? pieces : [pts];
+}
+
 // ── per-country rings ──────────────────────────────────────────────
 const byId = new Map();
 for (const f of feats) {
-  const ringsGeo = f.geometry.type === 'Polygon' ? [f.geometry.coordinates[0]] : f.geometry.coordinates.map((p) => p[0]);
-  const rings = ringsGeo.filter((r) => ringAreaKm2(r) >= RING_MIN_KM2);
-  if (rings.length === 0) continue;
-  const id = String(f.id);
-  byId.set(id, {
+  const outer = f.geometry.type === 'Polygon'
+    ? [f.geometry.coordinates[0]]
+    : f.geometry.coordinates.map((p) => p[0]);
+  const ringsGeo = outer.flatMap(splitAtSeam).filter((r) => ringAreaKm2(r) >= RING_MIN_KM2);
+  if (ringsGeo.length === 0) continue;
+  const id = f.id != null ? String(f.id) : `X:${f.properties.name}`;
+  const rec = {
     id,
     name: f.properties.name,
-    geoRings: rings,
-    rings: rings.map((r) => simplify(r, 60)),
-    area: totalArea(rings),
-    center: centroidOf(rings),
+    geoRings: ringsGeo,
+    rings: ringsGeo.map((r) => simplify(r, MAX_POINTS_PER_RING)),
+    area: totalArea(ringsGeo),
+    center: centroidOf(ringsGeo),
     neighbors: new Set(),
-  });
+  };
+  const prev = byId.get(id); // split geometries (e.g. Australia) merge together
+  if (prev) {
+    prev.geoRings = prev.geoRings.concat(rec.geoRings);
+    prev.rings = prev.rings.concat(rec.rings);
+    prev.area += rec.area;
+    prev.center = centroidOf(prev.geoRings);
+  } else {
+    byId.set(id, rec);
+  }
 }
 
-// ── land adjacency: after feature(), each topo arc carries __data__ with
-//    the geometries (1=coast, 2=land border) that share it ───────────
-const topoGeomToId = new Map(topo.objects.countries.geometries.map((g) => [g, String(g.id)]));
-for (const arc of topo.arcs) {
-  const owners = arc && arc.__data__ ? arc.__data__.map((g) => topoGeomToId.get(g)).filter(Boolean) : [];
-  const uniq = [...new Set(owners)];
-  if (uniq.length === 2) {
-    byId.get(uniq[0])?.neighbors.add(uniq[1]);
-    byId.get(uniq[1])?.neighbors.add(uniq[0]);
+// ── land adjacency: countries sharing a topojson arc are neighbours ─
+// TopoJSON geometry arcs live in g.arcs (negative = reversed ring pass).
+const topoGeoms = topo.objects.countries.geometries;
+const geoId = (g) => (g.id != null ? String(g.id) : 'X:' + g.properties.name);
+const idOf = new Map(topoGeoms.map((g) => [g, geoId(g)]));
+const geomsByArc = new Map();
+for (const g of topoGeoms) {
+  for (const arcIdx of (g.arcs ?? []).flat(2)) {
+    const a = arcIdx < 0 ? ~arcIdx : arcIdx;
+    let set = geomsByArc.get(a);
+    if (!set) geomsByArc.set(a, (set = new Set()));
+    set.add(g);
+  }
+}
+for (const set of geomsByArc.values()) {
+  if (set.size < 2) continue; // coastline arc
+  const list = [...set].map((g) => idOf.get(g)).filter((id) => id && byId.has(id));
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      if (list[i] !== list[j]) {
+        byId.get(list[i]).neighbors.add(list[j]);
+        byId.get(list[j]).neighbors.add(list[i]);
+      }
+    }
   }
 }
 
@@ -125,6 +206,11 @@ for (const c of small) {
   byId.delete(c.id);
 }
 
+// after merges, drop stale neighbour refs left by deleted countries
+for (const r of byId.values()) {
+  r.neighbors = new Set([...r.neighbors].filter((n) => byId.has(n)));
+}
+
 // ── sea links: ensure every region has ≥2 neighbours (islands!) ────
 for (const r of byId.values()) {
   while (r.neighbors.size < 2) {
@@ -137,6 +223,66 @@ for (const r of byId.values()) {
   }
 }
 function dist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+
+// ── curated sea routes: the world graph must be ONE component ──────
+const SEA_ROUTES = [
+  [-169, 65.5],  // Bering: Alaska ↔ Chukotka
+  [-30, 48],     // North Atlantic: Canada/EEUU ↔ Britania/Francia
+  [-17, -8],     // Sur Atlántico: Brasil ↔ Angola/Gabón
+  [66, 13],      // Mar Arábigo: Omán ↔ India
+  [-40, 17],     // Caribe ↔ África Occidental
+  [150, -2],     // Indonesia ↔ Nueva Guinea (ya terrestre si topología)
+];
+for (const [lon, lat] of SEA_ROUTES) {
+  const p = proj([lon, lat]);
+  const near = [...byId.values()].map((r) => ({ r, d: dist(r.center, p) })).sort((a, b) => a.d - b.d);
+  for (let i = 0; i < near.length; i++) {
+    for (let j = i + 1; j < Math.min(i + 10, near.length); j++) {
+      const a = near[i].r, b = near[j].r;
+      if (a.neighbors.has(b.id)) continue;
+      if (near[i].d > 600 && near[j].d > 600) continue;
+      a.neighbors.add(b.id);
+      b.neighbors.add(a.id);
+      i = near.length; break; // one route per waypoint
+    }
+  }
+}
+
+// ── connectivity guarantee: auto-close any remaining components ────
+function components() {
+  const seen = new Set();
+  const comps = [];
+  for (const start of byId.keys()) {
+    if (seen.has(start)) continue;
+    const comp = new Set([start]);
+    const q = [start];
+    while (q.length) {
+      const cur = byId.get(q.shift());
+      if (!cur) continue;
+      for (const n of cur.neighbors) {
+        if (!byId.has(n) || comp.has(n)) continue;
+        comp.add(n);
+        q.push(n);
+      }
+    }
+    comp.forEach((x) => seen.add(x));
+    comps.push(comp);
+  }
+  return comps;
+}
+for (let guard = 0; guard < 16; guard++) {
+  const comps = components();
+  if (comps.length <= 1) break;
+  const big = comps.reduce((a, b) => (b.size > a.size ? b : a));
+  const small = comps.filter((c) => c !== big).reduce((a, b) => (b.size <= a.size ? b : a));
+  let best = null;
+  for (const a of big) for (const b of small) {
+    const d = dist(byId.get(a).center, byId.get(b).center);
+    if (!best || d < best.d) best = { a, b, d };
+  }
+  byId.get(best.a).neighbors.add(best.b);
+  byId.get(best.b).neighbors.add(best.a);
+}
 
 // prune neighbour refs to existing regions + dedupe symmetric
 for (const r of byId.values()) {
@@ -202,7 +348,7 @@ lines.push(`];
 /** Bidirectional adjacency graph (land borders + island sea links). */
 export const ADJACENCY: Record<string, string[]> = {`);
 for (const r of regions) {
-  lines.push(`  ${r.id}: [${[...r.neighbors].map((n) => `'${n}'`).join(', ')}],`);
+  lines.push(`  '${r.id}': [${[...r.neighbors].map((n) => `'${n}'`).join(', ')}],`);
 }
 lines.push(`};
 
@@ -221,8 +367,8 @@ export const CONTINENTS: ContinentData[] = Object.entries(
 ).map(([id, regs]) => ({ id: id as ContinentId, name: CONTINENT_NAMES[id] ?? id, regions: regs, bonus: CONTINENT_BONUS[id] ?? 2 }));
 
 /** Starting homelands: 3 per side, positioned so fronts form early. */
-export const PLAYER_HOMELANDS = [${JSON.stringify(['840', '276', '076'])}]; // USA, Alemania, Brasil
-export const AI_HOMELANDS = [${JSON.stringify(['643', '156', '710'])}];      // Rusia, China, Sudáfrica
+export const PLAYER_HOMELANDS = ${JSON.stringify(['840', '276', '076'])}; // USA, Alemania, Brasil
+export const AI_HOMELANDS = ${JSON.stringify(['643', '156', '710'])};      // Rusia, China, Sudáfrica
 
 /** Troops placed in each homeland at game start. */
 export const STARTING_ARMIES = 8;
