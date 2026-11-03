@@ -21,32 +21,35 @@ import {
   createGame,
 } from '../core/rules';
 import { planAiTurn } from '../core/ai';
+import { sfx } from '../core/audio';
 import type { AiAction, FactionId, GameState } from '../core/types';
 import { makeButton } from './ui';
 
 const OWNER_FILL: Record<FactionId | 'neutral', number> = {
   player: 0x1d4ed8,
   ai: 0xb91c1c,
-  neutral: 0x334155,
+  neutral: 0x2b3a52,
 };
 
 const OWNER_LABEL: Record<FactionId | 'neutral', string> = {
   player: '#bfdbfe',
   ai: '#fecaca',
-  neutral: '#94a3b8',
+  neutral: '#8fa3bf',
 };
 
 interface WorldSceneData {
   first: FactionId;
+  homelands?: number;
 }
 
 /**
- * The world board with REAL country geometry (203 Natural Earth regions).
+ * The world board with REAL country geometry (208 Natural Earth regions).
  *
- * Viewport model: manual world→screen transform (camX/camY + zoom). The map
- * is panned by dragging and zoomed with the wheel — never by Phaser camera
- * zoom, which desynchronizes scrollFactor(0) HUD hit areas (learned the
- * hard way). Clicks are processed on pointerup so drags don't select.
+ * Viewport model: manual world→screen transform (camX/camY + zoom) — never
+ * Phaser camera zoom, which desynchronizes scrollFactor(0) HUD hit areas.
+ * Clicks resolve on pointerup so drags pan instead of selecting.
+ * Rendering is split in drawMap (fills+labels, on state/viewport change)
+ * and drawOverlay (selection/hover/flash, cheap enough for pointermove).
  */
 export class WorldScene extends Phaser.Scene {
   constructor() {
@@ -55,6 +58,7 @@ export class WorldScene extends Phaser.Scene {
 
   private state!: GameState;
   private firstPlayer: FactionId = 'player';
+  private homelandsCount = 3;
   private labels!: Map<string, { name: Phaser.GameObjects.Text; army: Phaser.GameObjects.Text }>;
   private fills!: Phaser.GameObjects.Graphics;
   private highlights!: Phaser.GameObjects.Graphics;
@@ -65,6 +69,7 @@ export class WorldScene extends Phaser.Scene {
   private view = { w: 1280, h: 800 };
 
   private selected: string | null = null;
+  private hoverId: string | null = null;
   private flash: { from: string; to: string; win: boolean } | null = null;
   private busy = false;
   private dragging = false;
@@ -74,22 +79,28 @@ export class WorldScene extends Phaser.Scene {
   private hud!: Phaser.GameObjects.Text;
   private log!: Phaser.GameObjects.Text;
   private mainBtn!: Phaser.GameObjects.Text;
+  private muteBtn!: Phaser.GameObjects.Text;
   private overlay = false;
 
   init(data: WorldSceneData): void {
     this.firstPlayer = data.first ?? 'player';
+    this.homelandsCount = Phaser.Math.Clamp(data.homelands ?? 3, 1, 5);
   }
 
   create(): void {
-    this.state = createGame(this.firstPlayer);
+    sfx.unlock();
+    this.makeFxTextures();
+    this.state = createGame(this.firstPlayer, this.homelandsCount);
     this.selected = null;
+    this.hoverId = null;
     this.flash = null;
     this.busy = false;
     this.dragging = false;
     this.overlay = false;
 
-    // Open the view near the player's first homeland, moderately zoomed.
-    const home = regionById.get(this.firstPlayer === 'player' ? '840' : '643');
+    // Open the view centered on the player's first homeland, moderately zoomed.
+    const homeId = this.state.initialHomelands.player[0] ?? this.state.initialHomelands.ai[0];
+    const home = homeId ? regionById.get(homeId) : undefined;
     this.camX = home ? home.center[0] : WORLD_WIDTH / 2;
     this.camY = home ? home.center[1] : WORLD_HEIGHT / 2;
     this.zoom = 1.6;
@@ -127,13 +138,13 @@ export class WorldScene extends Phaser.Scene {
         fontFamily: 'Sora, sans-serif',
         fontSize: '13px',
         color: '#e7ecf5',
-        backgroundColor: '#0a1122cc',
-        padding: { x: 10, y: 8 },
+        backgroundColor: '#0b1224d9',
+        padding: { x: 12, y: 8 },
       })
       .setDepth(12);
 
     this.log = this.add
-      .text(0, 0, 'Arrastra para moverte, rueda para hacer zoom.', {
+      .text(0, 0, 'Arrastra para moverte · rueda para zoom', {
         fontFamily: 'Inter, sans-serif',
         fontSize: '13px',
         color: '#9fb3d9',
@@ -143,23 +154,27 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(12);
 
     this.mainBtn = makeButton(this, 0, 0, 'Terminar turno', () => this.onMainButton());
+    this.muteBtn = makeButton(this, 0, 0, '🔊', () => {
+      this.muteBtn.setText(sfx.toggleMute() ? '🔇' : '🔊');
+    }, { bg: '#1f2937', fontSize: '13px', depth: 14 });
 
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
     this.handleResize();
 
     this.input.on('pointerdown', this.onDragStart, this);
-    this.input.on('pointermove', this.onDragMove, this);
+    this.input.on('pointermove', this.onPointerMove, this);
     this.input.on('pointerup', this.onPointerUp, this);
     this.input.on('wheel', this.onWheel, this);
 
     this.redraw();
     this.updateHud();
 
+    const homelands = this.state.initialHomelands.player.map(nameOf).join(' · ');
     if (this.state.current === 'ai') {
-      this.setLog('Empieza la computadora…');
+      this.setLog(`Tus países: ${homelands}. Empieza la computadora…`);
       this.runAiTurn();
     } else {
-      this.setLog('Tu turno: elige una región y atacá. Refuerzos: automáticos por turno.');
+      this.setLog(`Tus países: ${homelands}. Elige uno y ataca: los refuerzos llegan solos cada turno.`);
     }
   }
 
@@ -167,9 +182,72 @@ export class WorldScene extends Phaser.Scene {
     this.scale.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
   }
 
+  /** Test hooks (used by the E2E harness). */
+  neighborsOf(id: string): string[] {
+    return ADJACENCY[id] ?? [];
+  }
+
+  regionCenter(id: string): [number, number] | null {
+    const r = regionById.get(id);
+    return r ? r.center : null;
+  }
+
+  /**
+   * A point guaranteed (best-effort) to be inside the region's biggest ring —
+   * centroids fall in the ocean for concave countries. Test hook + AI focus.
+   */
+  interiorPoint(id: string): [number, number] | null {
+    const r = regionById.get(id);
+    if (!r) return null;
+    const largest = r.rings.reduce((a, b) => (a.length >= b.length ? a : b));
+    const ax = largest.reduce((s, p) => s + p[0], 0) / largest.length;
+    const ay = largest.reduce((s, p) => s + p[1], 0) / largest.length;
+    const candidates: [number, number][] = [
+      [r.center[0], r.center[1]],
+      [ax, ay],
+      ...largest.map((v) => [(v[0] + ax) / 2, (v[1] + ay) / 2] as [number, number]),
+    ];
+    for (const c of candidates) {
+      if (polygonContains(largest, c[0], c[1])) return c;
+    }
+    return [ax, ay];
+  }
+
+  // ── fx textures ──────────────────────────────────────────────────
+
+  private makeFxTextures(): void {
+    if (!this.textures.exists('spark')) {
+      const g = this.add.graphics();
+      g.fillStyle(0xffffff, 1).fillCircle(5, 5, 4);
+      g.generateTexture('spark', 10, 10);
+      g.destroy();
+    }
+    if (!this.textures.exists('confetti')) {
+      const g = this.add.graphics();
+      g.fillStyle(0xffffff, 1).fillRect(0, 0, 10, 16);
+      g.generateTexture('confetti', 10, 16);
+      g.destroy();
+    }
+  }
+
+  private captureFx(regionId: string, tint: number[]): void {
+    const center = this.regionCenter(regionId);
+    if (!center) return;
+    const p = this.worldToScreen(center[0], center[1]);
+    const burst = this.add.particles(p.x, p.y, 'spark', {
+      speed: { min: 70, max: 240 },
+      scale: { start: 1.2, end: 0 },
+      lifespan: 600,
+      tint,
+      emitting: false,
+    });
+    burst.explode(20);
+    this.cameras.main.shake(90, 0.004);
+    this.time.delayedCall(900, () => burst.destroy());
+  }
+
   // ── viewport ─────────────────────────────────────────────────────
 
-  /** Scale factor: base (world→screen at zoom 1) × user zoom. */
   private get s(): number {
     return this.baseS * this.zoom;
   }
@@ -201,8 +279,9 @@ export class WorldScene extends Phaser.Scene {
     this.view = { w: width, h: height };
     this.baseS = Math.min(width / WORLD_WIDTH, (height - 56) / WORLD_HEIGHT);
     this.clampCam();
-    this.log.setPosition(width / 2, height - 24);
-    this.mainBtn.setPosition(width - 110, height - 24);
+    this.log.setPosition(width / 2, height - 26);
+    this.mainBtn.setPosition(width - 120, height - 26);
+    this.muteBtn.setPosition(width - 34, 30);
     if (this.fills) this.redraw();
   }
 
@@ -210,7 +289,6 @@ export class WorldScene extends Phaser.Scene {
     if (this.busy || this.overlay) return;
     const before = this.screenToWorld(pointer.x, pointer.y);
     this.zoom = Phaser.Math.Clamp(this.zoom * (dy < 0 ? 1.2 : 1 / 1.2), 1, 9);
-    // Keep the world point under the cursor anchored.
     this.camX = before.x - (pointer.x - this.view.w / 2) / this.s;
     this.camY = before.y - (pointer.y - this.view.h / 2) / this.s;
     this.clampCam();
@@ -224,17 +302,27 @@ export class WorldScene extends Phaser.Scene {
     this.dragLast = { x: pointer.x, y: pointer.y };
   }
 
-  private onDragMove(pointer: Phaser.Input.Pointer): void {
-    if (!this.dragging || this.busy || this.overlay) return;
-    const dx = pointer.x - this.dragLast.x;
-    const dy = pointer.y - this.dragLast.y;
-    if (!this.dragMoved && Math.hypot(pointer.x - this.dragLast.x, pointer.y - this.dragLast.y) < 6) return;
-    this.dragMoved = true;
-    this.camX -= dx / this.s;
-    this.camY -= dy / this.s;
-    this.dragLast = { x: pointer.x, y: pointer.y };
-    this.clampCam();
-    this.redraw();
+  private onPointerMove(pointer: Phaser.Input.Pointer): void {
+    if (this.busy || this.overlay) return;
+    if (this.dragging) {
+      const dx = pointer.x - this.dragLast.x;
+      const dy = pointer.y - this.dragLast.y;
+      if (!this.dragMoved && Math.hypot(dx, dy) < 6) return;
+      this.dragMoved = true;
+      this.camX -= dx / this.s;
+      this.camY -= dy / this.s;
+      this.dragLast = { x: pointer.x, y: pointer.y };
+      this.clampCam();
+      this.redraw();
+      return;
+    }
+    // Hover: cheap overlay-only repaint.
+    const id = this.regionAt(pointer.x, pointer.y);
+    if (id !== this.hoverId) {
+      this.hoverId = id;
+      this.input.setDefaultCursor(id ? 'pointer' : 'default');
+      this.drawOverlay();
+    }
   }
 
   // ── rendering ────────────────────────────────────────────────────
@@ -245,20 +333,39 @@ export class WorldScene extends Phaser.Scene {
 
   private transformedRings(id: string): Phaser.Geom.Point[][] {
     const r = regionById.get(id)!;
-    return r.rings.map((ring) => ring.map(([x, y]) => {
-      const p = this.worldToScreen(x, y);
-      return new Phaser.Geom.Point(p.x, p.y);
-    }));
+    return r.rings.map((ring) =>
+      ring.map(([x, y]) => {
+        const p = this.worldToScreen(x, y);
+        return new Phaser.Geom.Point(p.x, p.y);
+      }),
+    );
   }
 
   private redraw(): void {
-    const { fills, highlights, state } = this;
+    this.drawMap();
+    this.drawOverlay();
+  }
+
+  private drawMap(): void {
+    const { fills, state } = this;
     fills.clear();
-    highlights.clear();
+
+    // Ocean graticule for depth.
+    fills.lineStyle(1, 0x1e3a8a, 0.16);
+    for (let x = 0; x <= WORLD_WIDTH; x += 512) {
+      const a = this.worldToScreen(x, 0);
+      const b = this.worldToScreen(x, WORLD_HEIGHT);
+      fills.lineBetween(a.x, a.y, b.x, b.y);
+    }
+    for (let y = 0; y <= WORLD_HEIGHT; y += 512) {
+      const a = this.worldToScreen(0, y);
+      const b = this.worldToScreen(WORLD_WIDTH, y);
+      fills.lineBetween(a.x, a.y, b.x, b.y);
+    }
 
     for (const r of REGIONS) {
       const pts = this.transformedRings(r.id);
-      fills.fillStyle(OWNER_FILL[this.regionColor(r.id)], 0.8);
+      fills.fillStyle(OWNER_FILL[this.regionColor(r.id)], 0.82);
       fills.lineStyle(1, 0x0a1122, 0.9);
       for (const ring of pts) {
         fills.fillPoints(ring, true);
@@ -266,7 +373,6 @@ export class WorldScene extends Phaser.Scene {
       }
     }
 
-    // Labels: name only when the region is big on screen (anti-clutter).
     for (const r of REGIONS) {
       const label = this.labels.get(r.id)!;
       const rs = state.regions[r.id];
@@ -288,18 +394,25 @@ export class WorldScene extends Phaser.Scene {
       label.army.setText(`${rs.armies}`);
       label.army.setColor(OWNER_LABEL[this.regionColor(r.id)]);
     }
+  }
 
-    // Selection + valid targets.
+  private drawOverlay(): void {
+    const { highlights, state } = this;
+    highlights.clear();
+
+    const stroke = (id: string, color: number, width: number, alpha = 0.95) => {
+      highlights.lineStyle(width, color, alpha);
+      for (const ring of this.transformedRings(id)) highlights.strokePoints(ring, true);
+    };
+
     if (this.selected) {
-      const stroke = (id: string, color: number, width: number) => {
-        highlights.lineStyle(width, color, 0.95);
-        for (const ring of this.transformedRings(id)) highlights.strokePoints(ring, true);
-      };
       stroke(this.selected, 0xfbbf24, 3);
       for (const n of ADJACENCY[this.selected] ?? []) {
         if (canAttack(state, this.selected, n)) stroke(n, 0x22d3ee, 2.5);
         else if (canMove(state, this.selected, n)) stroke(n, 0x34d399, 2);
       }
+    } else if (this.hoverId && !this.busy && !this.overlay && state.current === 'player') {
+      stroke(this.hoverId, 0xe2e8f0, 1.6, 0.5);
     }
 
     if (this.flash) {
@@ -323,9 +436,13 @@ export class WorldScene extends Phaser.Scene {
         : `Tu turno ${s.turn} — cada país ataca una vez`;
     this.hud.setText([
       phaseLabel,
-      `Tú: ${p.length}/${total} regiones · IA: ${a.length}   |   Ingreso — Tú: ${incomeFor(s, 'player')} · IA: ${incomeFor(s, 'ai')}`,
+      `Tú: ${p.length}/${total} · ${this.armiesOf('player')} ejércitos   |   IA: ${a.length} · ${this.armiesOf('ai')}   |   Producción — Tú: ${incomeFor(s, 'player')} · IA: ${incomeFor(s, 'ai')}`,
     ]);
     this.mainBtn.setVisible(s.current === 'player' && !this.busy);
+  }
+
+  private armiesOf(side: FactionId): number {
+    return ownedRegions(this.state, side).reduce((n, id) => n + this.state.regions[id].armies, 0);
   }
 
   private setLog(msg: string): void {
@@ -353,7 +470,7 @@ export class WorldScene extends Phaser.Scene {
     const id = this.regionAt(pointer.x, pointer.y);
     if (!id) {
       this.selected = null;
-      this.redraw();
+      this.drawOverlay();
       return;
     }
 
@@ -366,17 +483,22 @@ export class WorldScene extends Phaser.Scene {
         const p = previewAttack(s, from, id);
         const result = performAttack(s, from, id);
         this.flash = { from, to: id, win: result.willCapture };
-        this.setLog(
-          result.willCapture
-            ? `¡${nameOf(id)} es tuyo! Enviaste ${p.send}, bajas ${p.cost}, quedan ${result.survivors}.`
-            : `${nameOf(id)} resiste: perdiste ${p.send}.`,
-        );
+        sfx.attack();
+        if (result.willCapture) {
+          sfx.capture();
+          this.captureFx(id, [0xfbbf24, 0xf59e0b, 0xfef3c7]);
+          this.setLog(`¡${nameOf(id)} es tuyo! Enviaste ${p.send}, bajas ${p.cost}, quedan ${result.survivors}.`);
+        } else {
+          sfx.repel();
+          this.setLog(`${nameOf(id)} resiste: perdiste ${p.send}.`);
+        }
         this.selected = result.willCapture ? id : null;
         this.afterAction();
         return;
       }
       if (canMove(s, this.selected, id)) {
         const moved = moveArmies(s, this.selected, id, s.regions[this.selected].armies - 1);
+        sfx.move();
         this.setLog(`Mueves ${moved} desde ${nameOf(this.selected)} a ${nameOf(id)}.`);
         this.selected = null;
         this.afterAction();
@@ -387,16 +509,17 @@ export class WorldScene extends Phaser.Scene {
     if (rs.owner === 'player') {
       this.selected = this.selected === id ? null : id;
       if (this.selected) {
+        sfx.select();
         this.setLog(
           s.acted.includes(id)
             ? `${nameOf(id)} ya atacó este turno — elige otra región, mueve tropas o termina el turno.`
             : `${nameOf(id)}: toca un vecino celeste para atacar, verde para mover.`,
         );
       }
-      this.redraw();
+      this.drawOverlay();
     } else {
       this.selected = null;
-      this.redraw();
+      this.drawOverlay();
     }
   }
 
@@ -411,6 +534,7 @@ export class WorldScene extends Phaser.Scene {
     const s = this.state;
     if (s.current !== 'player' || this.busy) return;
     this.selected = null;
+    sfx.turn();
     endTurn(s); // now current === 'ai', its income auto-deploys
     this.redraw();
     this.updateHud();
@@ -422,7 +546,6 @@ export class WorldScene extends Phaser.Scene {
   private runAiTurn(): void {
     this.busy = true;
     this.updateHud();
-    // Plan on a clone; replay the same deterministic actions on the live state.
     const actions = planAiTurn(cloneState(this.state));
     this.playAiStep(actions, 0);
   }
@@ -449,13 +572,19 @@ export class WorldScene extends Phaser.Scene {
     if (a.type === 'attack') {
       const r = performAttack(s, a.from, a.to);
       this.flash = { from: a.from, to: a.to, win: r.willCapture };
+      sfx.attack();
+      if (r.willCapture) {
+        sfx.capture();
+        this.captureFx(a.to, [0xef4444, 0xf97316, 0xfecaca]);
+      }
       this.setLog(`IA: ${nameOf(a.from)} ataca ${nameOf(a.to)} — ${r.willCapture ? 'la conquista' : 'fracasa'}.`);
     } else {
       moveArmies(s, a.from, a.to, a.amount);
       this.flash = { from: a.from, to: a.to, win: true };
+      sfx.aiTick();
       this.setLog(`IA mueve ${a.amount} ejércitos hacia el frente (${nameOf(a.to)}).`);
     }
-    if (this.flash) this.time.delayedCall(400, () => { this.flash = null; this.redraw(); });
+    if (this.flash) this.time.delayedCall(400, () => { this.flash = null; this.drawOverlay(); });
   }
 
   private finishAiTurn(): void {
@@ -468,10 +597,12 @@ export class WorldScene extends Phaser.Scene {
       this.showGameOver();
       return;
     }
-    endTurn(s); // back to player, income auto-deploys
+    const res = endTurn(s); // back to player, income auto-deploys
+    sfx.turn();
     this.redraw();
     this.updateHud();
-    this.setLog('Tu turno: los refuerzos ya están en el frente. Atacá.');
+    const where = res.places.map(nameOf).join(', ');
+    this.setLog(`Tu turno ${s.turn}: +${res.income} refuerzos desplegados en ${where}.`);
   }
 
   // ── game over ────────────────────────────────────────────────────
@@ -479,37 +610,89 @@ export class WorldScene extends Phaser.Scene {
   private showGameOver(): void {
     this.overlay = true;
     this.busy = true;
+    this.mainBtn.setVisible(false);
     const playerWon = this.state.winner === 'player';
     const { width, height } = this.scale;
 
-    this.add
-      .rectangle(0, 0, width, height, 0x0a1122, 0.86)
+    const backdrop = this.add
+      .rectangle(0, 0, width, height, 0x060a16, 0.9)
       .setOrigin(0)
-      .setDepth(30);
+      .setDepth(30)
+      .setAlpha(0);
+    this.tweens.add({ targets: backdrop, alpha: 1, duration: 500 });
 
-    this.add
-      .text(width / 2, height / 2 - 60, playerWon ? '¡DOMINAS EL MUNDO!' : 'FIN DEL IMPERIO', {
+    const title = this.add
+      .text(width / 2, height / 2 - 90, playerWon ? '¡VICTORIA!' : 'DERROTA', {
         fontFamily: 'Sora, sans-serif',
-        fontSize: '34px',
+        fontSize: '64px',
         fontStyle: 'bold',
         color: playerWon ? '#fbbf24' : '#ef4444',
+        stroke: playerWon ? '#92400e' : '#7f1d1d',
+        strokeThickness: 10,
       })
       .setOrigin(0.5)
-      .setDepth(31);
+      .setScale(2.6)
+      .setAlpha(0)
+      .setDepth(31)
+      .setShadow(0, 0, playerWon ? '#fbbf24' : '#ef4444', 30, true, true);
+    this.tweens.add({
+      targets: title,
+      scale: 1,
+      alpha: 1,
+      duration: 650,
+      ease: 'Back.easeOut',
+      delay: 150,
+    });
 
-    this.add
-      .text(width / 2, height / 2 - 10, playerWon ? `Conquistaste las ${REGIONS.length} regiones en ${this.state.turn} turnos.` : 'La IA conquistó el mundo. ¿Otra vez?', {
-        fontFamily: 'Inter, sans-serif',
-        fontSize: '15px',
-        color: '#9fb3d9',
-      })
+    const total = REGIONS.length;
+    const stats = this.add
+      .text(
+        width / 2,
+        height / 2 - 16,
+        playerWon
+          ? `Conquistaste los ${total} países en ${this.state.turn} turnos.`
+          : `La IA dominó el mundo en ${this.state.turn} turnos.\nTú controlabas ${ownedRegions(this.state, 'player').length} países.`,
+        {
+          fontFamily: 'Inter, sans-serif',
+          fontSize: '16px',
+          color: '#cbd5e1',
+          align: 'center',
+        },
+      )
       .setOrigin(0.5)
+      .setAlpha(0)
       .setDepth(31);
+    this.tweens.add({ targets: stats, alpha: 1, duration: 500, delay: 600 });
 
-    makeButton(this, width / 2 - 110, height / 2 + 60, 'Volver a jugar', () =>
-      this.scene.start('World', { first: this.firstPlayer }),
+    if (playerWon) {
+      sfx.victory();
+      const confetti = this.add.particles(0, -20, 'confetti', {
+        x: { min: 0, max: width },
+        lifespan: 2800,
+        speedY: { min: 120, max: 300 },
+        speedX: { min: -50, max: 50 },
+        rotate: { min: 0, max: 360 },
+        rotateSpeed: { min: -260, max: 260 },
+        scale: { min: 0.7, max: 1.4 },
+        tint: [0xfbbf24, 0x22d3ee, 0xa78bfa, 0x34d399, 0xf472b6],
+        frequency: 55,
+        quantity: 3,
+      });
+      this.time.delayedCall(5000, () => confetti.destroy());
+    } else {
+      sfx.defeat();
+    }
+
+    const btnY = height / 2 + 90;
+    makeButton(
+      this,
+      width / 2 - 118,
+      btnY,
+      '↻ Revancha',
+      () => this.scene.start('World', { first: this.firstPlayer, homelands: this.homelandsCount }),
+      { bg: '#0ea5e9', color: '#04121f' },
     );
-    makeButton(this, width / 2 + 110, height / 2 + 60, 'Menú', () => this.scene.start('Menu'), { bg: '#1f2937' });
+    makeButton(this, width / 2 + 118, btnY, 'Menú', () => this.scene.start('Menu'), { bg: '#1f2937' });
   }
 }
 
